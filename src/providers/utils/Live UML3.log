@@ -1,0 +1,20 @@
+[06:11:34.767] Extension activating
+[06:11:34.770] Starting PlantUML server on port 8103 with java=/opt/homebrew/opt/openjdk/bin/java
+[06:11:34.869] WARN: PlantUML Server stderr: webPort=8103
+
+[06:11:36.272] PlantUML server ready at http://localhost:8103
+[06:11:40.906] refresh(): language=javascript, uri=file:///Users/naveed/Project/Python/liveuml/extension/src/providers/utils/StateAnalyzer.js
+[06:11:41.903] refresh(): language=javascript, uri=file:///Users/naveed/Project/Python/liveuml/extension/src/providers/utils/StateAnalyzer.js
+[06:11:43.957] onDidReceiveMessage: type=changeDiagramType
+[06:11:43.957] changeDiagramType: flowchart
+[06:11:44.894] refresh(): language=javascript, uri=file:///Users/naveed/Project/Python/liveuml/extension/src/providers/utils/StateAnalyzer.js
+[06:11:47.120] onDidReceiveMessage: type=changeDiagramType
+[06:11:47.120] changeDiagramType: sequence
+[06:11:47.696] onDidReceiveMessage: type=changeDiagramType
+[06:11:47.696] changeDiagramType: state
+[06:11:48.128] onDidReceiveMessage: type=changeDiagramType
+[06:11:48.128] changeDiagramType: class
+[06:11:48.916] refresh(): language=javascript, uri=file:///Users/naveed/Project/Python/liveuml/extension/src/providers/utils/StateAnalyzer.js
+[06:11:57.815] refresh(): language=javascript, uri=file:///Users/naveed/Project/Python/liveuml/extension/src/providers/utils/StateAnalyzer.js
+[06:12:21.855] refresh(): language=javascript, uri=file:///Users/naveed/Project/Python/liveuml/extension/src/providers/utils/StateAnalyzer.js
+[06:12:28.442] refresh(): language=javascript, uri=file:///Users/naveed/Project/Python/liveuml/extension/src/providers/utils/StateAnalyzer.js

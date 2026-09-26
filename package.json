@@ -1,0 +1,147 @@
+{
+    "name": "live-uml-evo",
+    "displayName": "Live Uml Evo",
+    "description": "Forked from @codenaveed. Live PlantUML flowchart, sequence diagram, state machine and class diagram for C, C++, Java, JavaScript, TypeScript, and Python code & full project diagram editor",
+    "version": "1.0.0",
+    "publisher": "elfilippo",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/elfilippo/live-uml-evo.git"
+    },
+    "readme": "README.md",
+    "changelog": "CHANGELOG.md",
+    "icon": "icon.png",
+    "engines": {
+        "vscode": "^1.60.0"
+    },
+    "keywords": [
+        "mermaid",
+        "PlantUML",
+        "UML",
+        "flowchart",
+        "sequence diagram",
+        "class diagram",
+        "state machine diagram",
+        "instant diagram",
+        "live diagram",
+        "visualization",
+        "C",
+        "C++",
+        "Java",
+        "Python",
+        "JavaScript",
+        "TypeScript",
+        "code visualization",
+        "diagram generator",
+        "real-time diagram",
+		"project diagram"
+    ],
+    "categories": [
+        "Visualization",
+        "Programming Languages"
+    ],
+    "activationEvents": [
+        "onStartupFinished",
+        "onLanguage:c",
+        "onLanguage:cpp",
+        "onLanguage:java",
+        "onLanguage:javascript",
+        "onLanguage:typescript",
+        "onLanguage:typescriptreact",
+        "onLanguage:python"
+    ],
+    "main": "./src/extension.js",
+    "contributes": {
+        "views": {
+            "live-uml-evo": [
+                {
+                    "type": "webview",
+                    "id": "liveUmlEvoSidebar-webview",
+                    "name": "Live Uml Evo",
+                    "icon": "iconSimple.png"
+                }
+            ]
+        },
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "live-uml-evo",
+                    "title": "Live Uml Evo",
+                    "icon": "$(preview)"
+                }
+            ]
+        },
+        "commands": [
+            {
+                "command": "liveUmlEvo.generateDiagram",
+                "title": "Generate PlantUML Diagram",
+                "category": "Live Uml Evo"
+            },
+            {
+                "command": "liveUmlEvo.copyPlantUML",
+                "title": "Copy PlantUML Code",
+                "category": "Live Uml Evo"
+            },
+            {
+                "command": "liveUmlEvo.configureJavaPath",
+                "title": "Configure Java Path",
+                "category": "Live Uml Evo"
+            },
+            {
+                "command": "extension.openClass",
+                "title": "Open Class Definition",
+                "category": "Live Uml Evo"
+            }
+        ],
+        "menus": {
+            "view/title": [
+                {
+                    "command": "liveUmlEvo.refreshDiagrams",
+                    "when": "view == liveUmlEvoSidebar-webview",
+                    "group": "navigation"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "liveUmlEvo.copyPlantUML",
+                    "when": "view == liveUmlEvoSidebar-webview && viewItem == functionItem",
+                    "group": "inline"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "Live Uml Evo",
+            "properties": {
+                "liveUmlEvo.javaPath": {
+                    "type": "string",
+                    "default": "java",
+                    "description": "Path to the Java executable used to run PlantUML. Set this if Java is not in your system PATH, or to use a specific Java installation."
+                },
+                "liveUmlEvo.classExcludePatterns": {
+                    "type": "string",
+                    "default": "node_modules, build, bin, dist, target",
+                    "description": "Comma-separated directory names to exclude from class diagram scanning."
+                },
+                "liveUmlEvo.debug": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enable verbose debug logging to the 'Live Uml Evo' output channel. Useful for diagnosing blank sidebar or diagram generation issues."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "echo 'Ready'",
+        "package": "vsce package --allow-missing-repository"
+    },
+    "license": "MIT",
+    "dependencies": {
+        "tree-sitter-c": "^0.24.1",
+        "tree-sitter-cpp": "^0.23.4",
+        "tree-sitter-java": "^0.23.5",
+        "tree-sitter-javascript": "^0.25.0",
+        "tree-sitter-python": "^0.25.0",
+        "tree-sitter-typescript": "^0.23.2",
+        "web-tree-sitter": "^0.26.9"
+    }
+}
