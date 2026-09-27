@@ -19,9 +19,21 @@
  *  - A field that matches neither pattern still becomes an aggregation edge
  *    (the safer, weaker claim) but with confidence 'low', so it's visually
  *    distinguishable and easy to correct or drop.
- *  - Dependency (dashed arrow): a class named in a method's parameters or
- *    return type, when that pair isn't already linked by inheritance,
+ *  - Dependency (dashed arrow): a class named anywhere in a method's
+ *    parameters, return type, or body (a static call, a local variable, a
+ *    cast, etc.), when that pair isn't already linked by inheritance,
  *    realization, or a field relationship — "uses", not "owns".
+ *  - Realization to a generic interface (`implements Comparable<Car>`) still
+ *    resolves against the base interface name; a known class named inside
+ *    the generic argument gets its own dependency edge instead of being
+ *    dropped.
+ *  - A class's own generic bound (`class Fleet<T extends Vehicle>`) produces
+ *    an inheritance-like edge to the bound type — it's explicit in source,
+ *    not a heuristic.
+ *  - An enum-typed field produces no ownership edge (it's already visible in
+ *    the attribute list); a field bidirectionally mirrored by another class's
+ *    field only keeps its ownership diamond on the stronger (composition >
+ *    aggregation) side — the weaker direction is downgraded to a dependency.
  *  - Only classes present in the analyzed set are ever linked; a field or
  *    parameter typed as a JDK/stdlib/external type simply produces no edge,
  *    since there's nothing in the model to draw it to.
@@ -102,18 +114,52 @@ function classifyFieldOwnership(cls, field, targetClassName, ownParamNames) {
     return { relation: 'aggregation', confidence: 'low' };
 }
 
+// A class's use of another type isn't limited to fields and method
+// signatures — a static call (`Logger.log(...)`) or a purely local variable
+// (`Logger log = new Logger();`) never touches a field or a parameter, but
+// it's still a real "uses" relationship. Scanning the whole class body is
+// the simplest way to catch these too; anything already linked via
+// inheritance/realization/a field is excluded so it isn't duplicated here.
 function collectDependencies(cls, classNames, alreadyLinked) {
     const deps = new Set();
-    (cls.methods || []).forEach(m => {
-        const paramsStr = typeof m.params === 'string' ? m.params : '';
-        const returnStr = m.type || '';
-        for (const name of classNames) {
-            if (name === cls.name || alreadyLinked.has(name) || deps.has(name)) continue;
-            const re = new RegExp(`\\b${escapeRegExp(name)}\\b`);
-            if (re.test(paramsStr) || re.test(returnStr)) deps.add(name);
-        }
-    });
+    const body = cls.body || '';
+    for (const name of classNames) {
+        if (name === cls.name || alreadyLinked.has(name)) continue;
+        const re = new RegExp(`\\b${escapeRegExp(name)}\\b`);
+        if (re.test(body)) deps.add(name);
+    }
     return Array.from(deps);
+}
+
+// Splits a realized type that carries its own generic arguments
+// (`Comparable<Car>` -> base `Comparable`, args `Car`) so a generic
+// realization isn't dropped just because the raw string doesn't match a
+// plain class name.
+function splitGenericReference(rawRef) {
+    const str = String(rawRef || '');
+    const baseMatch = str.match(/^\s*([\w.]+)/);
+    const base = baseMatch ? baseMatch[1].split('.').pop() : str.trim();
+    const argsMatch = str.match(/<([\s\S]+)>/);
+    return { base, args: argsMatch ? argsMatch[1] : '' };
+}
+
+// A class's own declaration can bound its type parameter to another known
+// class (`class Fleet<T extends Vehicle>`) — an explicit, exact relationship
+// in source, not a heuristic one, so it's treated like inheritance. Only
+// matches this `extends`-bound style; if a provider's `body` doesn't include
+// the class's own declaration line verbatim, this simply finds nothing, same
+// as before.
+function extractGenericBoundTargets(cls, classNames) {
+    const body = cls.body || '';
+    const declMatch = body.match(new RegExp(`\\bclass\\s+${escapeRegExp(cls.name)}\\s*<([^>]+)>`));
+    if (!declMatch) return [];
+    const bounds = [];
+    const boundRe = /extends\s+([\w.]+)/g;
+    let m;
+    while ((m = boundRe.exec(declMatch[1])) !== null) {
+        bounds.push(m[1].split('.').pop());
+    }
+    return bounds.filter(name => name !== cls.name && classNames.includes(name));
 }
 
 class RelationshipAnalyzer {
@@ -144,11 +190,26 @@ class RelationshipAnalyzer {
                 addEdge(cls.name, cls.parent, 'inheritance');
                 linkedTargets.add(cls.parent);
             }
-            (cls.interfaces || []).forEach(iface => {
-                if (classByName.has(iface)) {
-                    addEdge(cls.name, iface, 'realization');
-                    linkedTargets.add(iface);
+            (cls.interfaces || []).forEach(rawIface => {
+                const { base, args } = splitGenericReference(rawIface);
+                if (classByName.has(base)) {
+                    addEdge(cls.name, base, 'realization');
+                    linkedTargets.add(base);
                 }
+                // The interface's own type argument (e.g. the `Car` in
+                // `Comparable<Car>`) isn't implemented, but it is used, so it
+                // still earns an edge rather than being silently dropped.
+                findReferencedClasses(args, classNames).forEach(target => {
+                    if (target !== cls.name && !linkedTargets.has(target)) {
+                        addEdge(cls.name, target, 'dependency', { confidence: 'medium' });
+                        linkedTargets.add(target);
+                    }
+                });
+            });
+
+            extractGenericBoundTargets(cls, classNames).forEach(target => {
+                addEdge(cls.name, target, 'inheritance', { confidence: 'medium' });
+                linkedTargets.add(target);
             });
 
             const ownParamNames = paramNamesOf(cls);
@@ -164,6 +225,14 @@ class RelationshipAnalyzer {
                         // `children`/`next`) is legitimate and kept.
                         return;
                     }
+                    const targetCls = classByName.get(target);
+                    if (targetCls && (targetCls.isEnum || targetCls.kind === 'enum')) {
+                        // Enum values aren't independently-owned sub-objects, and
+                        // they're already visible in the attribute list — no
+                        // ownership edge for it.
+                        linkedTargets.add(target);
+                        return;
+                    }
                     const { relation, confidence } = classifyFieldOwnership(cls, field, target, ownParamNames);
                     addEdge(cls.name, target, relation, {
                         label: field.name,
@@ -177,6 +246,34 @@ class RelationshipAnalyzer {
             collectDependencies(cls, classNames, linkedTargets).forEach(target => {
                 addEdge(cls.name, target, 'dependency', { confidence: 'medium' });
             });
+        }
+
+        // Two classes that each hold a field referencing the other (Garage
+        // has a List<Car>, Car has a back-reference `garage`) end up with an
+        // ownership diamond in both directions. Only the real owner (ranked
+        // composition > aggregation) keeps its diamond; the reverse edge is
+        // downgraded to a dependency — the class still uses the type, it
+        // just doesn't own it.
+        const ownershipRank = { composition: 2, aggregation: 1 };
+        for (const rel of relationships) {
+            if (!(rel.type in ownershipRank)) continue;
+            const reverse = relationships.find(r => r !== rel
+                && r.from === rel.to && r.to === rel.from
+                && r.type in ownershipRank);
+            if (!reverse) continue;
+            let loser;
+            if (ownershipRank[rel.type] !== ownershipRank[reverse.type]) {
+                loser = ownershipRank[rel.type] > ownershipRank[reverse.type] ? reverse : rel;
+            } else if (rel.multiplicity === '*' && reverse.multiplicity !== '*') {
+                loser = reverse;
+            } else if (reverse.multiplicity === '*' && rel.multiplicity !== '*') {
+                loser = rel;
+            } else {
+                loser = reverse;
+            }
+            loser.type = 'dependency';
+            loser.confidence = 'low';
+            delete loser.multiplicity;
         }
 
         return { classes, relationships };
