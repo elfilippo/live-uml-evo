@@ -1,16 +1,17 @@
-# Live Uml Evo
-
-Visualize your logic in real-time with Live Uml Evo for VS Code. This extension instantly transforms C, C++, Java, JS/TS, and Python code into dynamic PlantUML flowchart, sequence diagram, state machine diagram and class diagram as you type. All generation and rendering is processed locally on your machine, you get blazing-fast performance and total privacy with zero latency. Both PlantUML and Mermaid are supported and rendered live on sidebar.
+# Live UML Evo
+This is a fork of @codenaveed's Live UML extension as I needed to adjust some things for personal use and the repository was down.
+Visualize your logic in real-time with Live Uml Evo for VS Code. This extension instantly transforms C, C++, Java, JS/TS, and Python code into dynamic PlantUML flowchart, sequence diagram, state machine diagram and class diagram as you type. All generation and rendering is processed locally on your machine, you get blazing-fast performance and total privacy with zero latency. Both PlantUML and Mermaid are supported and rendered live on sidebar. Also has a project view that is able to display the full project or select packages/folders with customizable colors and even the possibility to edit the code yourself to create any diagram you want.
 
 ## Features
 
 - **Multi-language support**: C, C++, Java, JavaScript, TypeScript, Python
 - **Live diagram generation**: Automatically generates diagrams as you type
-- **Multiple diagram types**: Flowcharts and sequence diagrams
+- **Multiple diagram types**: Flowcharts and sequence diagrams as well as class diagrams
 - **Real-time synchronization**: Diagrams update automatically when code changes
 - **Sidebar integration**: View and generate diagrams from the sidebar
-- **PlantUML export**: Copy PlantUML code to use in other tools like Confluence
+- **Code export**: Copy PlantUML or Mermaid code to use in other tools like Confluence
 - **Auto-detection**: Automatically detects functions/methods in your code
+- **Project Diagrams**: Creates a diagram for the entire project or select folders and allows you to edit its colors and code
 
 ## Demo
 
@@ -33,7 +34,7 @@ Diagrams update in real-time as you write code — no need to click anything.
 ![State Diagram](https://raw.githubusercontent.com/codenaveed/media/main/liveuml/demostate.png)
 
 ### Export & Copy
-Download the generated diagram as PNG or copy the PlantUML code for use in Confluence and other tools.
+Download the generated diagrams as PNG or copy their code for use in Confluence and other tools.
 
 ![Exporting the diagram](https://raw.githubusercontent.com/codenaveed/media/main/liveuml/demoexport.png)
 
@@ -49,7 +50,8 @@ Download the generated diagram as PNG or copy the PlantUML code for use in Confl
    - **State Machine**: State machine visualization for a function.
 5. Diagrams update automatically as you type or change files.
 6. **Interact**: In Class Diagrams, click on any class box to instantly jump to its source code and re-center the diagram.
-7. Click **"📋 Code"** or **"🖼️ Copy SVG"** to export your diagram for Confluence or other tools.
+7. Click the **"📦 Package"** or **"📐 Project"** buttons to open the Project Diagram view and create and edit full-scale diagrams of your project.
+8. Click **"📋 Code"** or **"🖼️ Copy SVG"** to export your diagrams for Confluence or other tools.
 
 ## Supported Languages
 
@@ -62,7 +64,7 @@ Download the generated diagram as PNG or copy the PlantUML code for use in Confl
 | Python     | `.py`                                    |
 
 ## Diagram Format
-Diagrams are rendered live on sidebar in following formats:
+Diagrams are rendered live in the sidebar or project view in the following formats:
 - PlantUML
 - Mermaid
 
@@ -81,7 +83,7 @@ Shows the sequence of function calls and interactions within a method:
 - Return values
 - Interactions between components
 
-### Class Diagram (OO Languages)
+### Class Diagram
 Visualizes the object-oriented structure of your codebase with intelligent navigation:
 - **Workspace-Wide Discovery**: Automatically finds all classes and interfaces across your entire project, not just the current file.
 - **Contextual Bounding**: To prevent massive, unreadable diagrams, the view is strictly scoped to the *active class's context*. It displays the full inheritance path up to the root, the path down to the leaves, and immediate siblings.
