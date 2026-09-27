@@ -16,7 +16,8 @@ function normalizeMembers(raw) {
             params: formatParams(member.params !== undefined ? member.params : member.parameters),
             visibility: typeof visibility === 'string' && visibility.length === 1 ? visibility : '+',
             isStatic: !!member.isStatic,
-            isAbstract: !!member.isAbstract
+            isAbstract: !!member.isAbstract,
+            isEnumConstant: !!member.isEnumConstant
         };
     }).filter(Boolean);
 }
@@ -165,7 +166,7 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
             // Guard: skip any entry that has no valid name (prevents blank `interface {` syntax errors)
             if (!c.name || !c.name.trim()) return;
 
-            const type = c.isInterface ? 'interface' : (c.isAbstract ? 'abstract class' : 'class');
+            const type = c.isEnum ? 'enum' : (c.isInterface ? 'interface' : (c.isAbstract ? 'abstract class' : 'class'));
             // Add tooltip to indicate clickability. Remove link entirely if class is external (not in workspace).
             const tooltip = `Click to open ${c.name} and explore its hierarchy`;
             const link = c.isExternal ? '' : `[[command:extension.openClass?${c.name} {${tooltip}}]]`;
@@ -176,8 +177,16 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
                 uml.push(`${type} ${c.name} ${link} {`);
             }
 
-            const fields = normalizeMembers(c.fields || c.attributes || c.properties);
+            const allFields = normalizeMembers(c.fields || c.attributes || c.properties);
+            const constants = allFields.filter(f => f.isEnumConstant);
+            const fields = allFields.filter(f => !f.isEnumConstant);
             const methods = normalizeMembers(c.methods || c.functions);
+
+            constants.forEach(cst => {
+                uml.push(`  ${cst.name}`);
+            });
+
+            if (constants.length > 0 && (fields.length > 0 || methods.length > 0)) uml.push('  --');
 
             fields.forEach(f => {
                 uml.push(`  ${f.visibility}${decorate(f)}${f.name}${f.type ? ` : ${f.type}` : ''}`);

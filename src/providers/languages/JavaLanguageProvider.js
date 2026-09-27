@@ -45,6 +45,53 @@ class JavaLanguageProvider extends BaseLanguageProvider {
         return null;
     }
 
+    createMemberState(body, classMatch) {
+        return { visibility: null, isEnum: !!(classMatch && classMatch.isEnum) };
+    }
+
+    collectExtraFields(body, state) {
+        if (!state || !state.isEnum) return [];
+
+        const lines = body.split('\n');
+        let depth = 0;
+        for (const line of lines) {
+            const depthBefore = depth;
+            depth += this._braceDelta(line);
+            if (depthBefore !== 1) continue;
+
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            // Enum constants are the first depth-1 statement in the body, e.g.
+            // "SUMMER, WINTER, ALL_SEASON;" or "SUMMER(1), WINTER(2);". Whatever
+            // this first statement is, it's either that constant list or the
+            // enum has none - either way there's nothing more to look for.
+            return this.matchEnumConstants(trimmed);
+        }
+        return [];
+    }
+
+    matchEnumConstants(trimmed) {
+        let body = trimmed;
+        if (body.endsWith(';')) body = body.slice(0, -1);
+        else if (body.endsWith(',')) body = body.slice(0, -1);
+        if (!body || /[{}]/.test(body) || /^@/.test(body)) return [];
+
+        const parts = body.split(',').map(s => s.trim()).filter(Boolean);
+        if (!parts.length) return [];
+
+        const constantPattern = /^([A-Z][A-Za-z0-9_]*)(?:\([^)]*\))?$/;
+        if (!parts.every(p => constantPattern.test(p))) return [];
+
+        return parts.map(p => ({
+            name: p.match(constantPattern)[1],
+            type: '',
+            visibility: '+',
+            isStatic: true,
+            isEnumConstant: true
+        }));
+    }
+
     matchField(line) {
         const trimmed = line.trim();
         if (!trimmed.endsWith(';')) return null;

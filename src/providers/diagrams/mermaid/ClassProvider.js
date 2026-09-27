@@ -20,7 +20,8 @@ function normalizeMembers(raw) {
             params: formatParams(member.params !== undefined ? member.params : member.parameters),
             visibility: typeof visibility === 'string' && visibility.length === 1 ? visibility : '+',
             isStatic: !!member.isStatic,
-            isAbstract: !!member.isAbstract
+            isAbstract: !!member.isAbstract,
+            isEnumConstant: !!member.isEnumConstant
         };
     }).filter(Boolean);
 }
@@ -133,6 +134,10 @@ class ClassProvider extends MermaidDiagramProvider {
                 lines.push(`    class ${escapedName} {`);
                 lines.push('        <<external>>');
                 lines.push('    }');
+            } else if (c.isEnum) {
+                lines.push(`    class ${escapedName} {`);
+                lines.push('        <<enumeration>>');
+                lines.push('    }');
             } else if (isInterface) {
                 lines.push(`    class ${escapedName} {`);
                 lines.push('        <<interface>>');
@@ -145,8 +150,14 @@ class ClassProvider extends MermaidDiagramProvider {
                 lines.push(`    class ${escapedName}`);
             }
 
-            const fields = normalizeMembers(c.fields || c.attributes || c.properties);
+            const allFields = normalizeMembers(c.fields || c.attributes || c.properties);
+            const constants = allFields.filter(f => f.isEnumConstant);
+            const fields = allFields.filter(f => !f.isEnumConstant);
             const methods = normalizeMembers(c.methods || c.functions);
+
+            constants.forEach(cst => {
+                lines.push(`    ${escapedName} : ${escapeMermaid(cst.name)}`);
+            });
 
             fields.forEach(f => {
                 const type = f.type ? `${escapeMermaid(f.type)} ` : '';
