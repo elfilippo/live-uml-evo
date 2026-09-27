@@ -21,7 +21,8 @@ function normalizeMembers(raw) {
             visibility: typeof visibility === 'string' && visibility.length === 1 ? visibility : '+',
             isStatic: !!member.isStatic,
             isAbstract: !!member.isAbstract,
-            isEnumConstant: !!member.isEnumConstant
+            isEnumConstant: !!member.isEnumConstant,
+            hasOverride: !!member.hasOverride
         };
     }).filter(Boolean);
 }
@@ -156,7 +157,8 @@ class ClassProvider extends MermaidDiagramProvider {
             const methods = normalizeMembers(c.methods || c.functions);
 
             constants.forEach(cst => {
-                lines.push(`    ${escapedName} : ${escapeMermaid(cst.name)}`);
+                const marker = cst.hasOverride ? '{overrides} ' : '';
+                lines.push(`    ${escapedName} : ${marker}${escapeMermaid(cst.name)}`);
             });
 
             fields.forEach(f => {

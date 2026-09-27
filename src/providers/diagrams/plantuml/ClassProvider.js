@@ -17,7 +17,8 @@ function normalizeMembers(raw) {
             visibility: typeof visibility === 'string' && visibility.length === 1 ? visibility : '+',
             isStatic: !!member.isStatic,
             isAbstract: !!member.isAbstract,
-            isEnumConstant: !!member.isEnumConstant
+            isEnumConstant: !!member.isEnumConstant,
+            hasOverride: !!member.hasOverride
         };
     }).filter(Boolean);
 }
@@ -183,7 +184,8 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
             const methods = normalizeMembers(c.methods || c.functions);
 
             constants.forEach(cst => {
-                uml.push(`  ${cst.name}`);
+                const marker = cst.hasOverride ? '{overrides} ' : '';
+                uml.push(`  ${marker}${cst.name}`);
             });
 
             if (constants.length > 0 && (fields.length > 0 || methods.length > 0)) uml.push('  --');

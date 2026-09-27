@@ -49,47 +49,136 @@ class JavaLanguageProvider extends BaseLanguageProvider {
         return { visibility: null, isEnum: !!(classMatch && classMatch.isEnum) };
     }
 
+    // Enum constants that take constructor args or have a per-constant
+    // anonymous body (e.g. "PLUS(\"+\") { ... }") look exactly like a method
+    // declaration to matchFunctionStart, so the base member loop ends up
+    // filing them as methods before collectExtraFields ever runs - and its
+    // own "already seen" guard then refuses to also add them as fields.
+    // Recompute the real constant list independently here and reconcile.
+    extractMembers(body, classMatch = null) {
+        const result = super.extractMembers(body, classMatch);
+        if (!classMatch || !classMatch.isEnum) return result;
+
+        const constants = this.collectExtraFields(body, { isEnum: true });
+        if (constants.length === 0) return result;
+
+        const constantNames = new Set(constants.map(c => c.name));
+        const methods = result.methods.filter(m => !constantNames.has(m.name));
+
+        const existingFieldNames = new Set(result.fields.map(f => f.name));
+        const fields = [
+            ...constants.filter(c => !existingFieldNames.has(c.name)),
+            ...result.fields
+        ];
+
+        return { methods, fields };
+    }
+
     collectExtraFields(body, state) {
         if (!state || !state.isEnum) return [];
 
-        const lines = body.split('\n');
-        let depth = 0;
-        for (const line of lines) {
-            const depthBefore = depth;
-            depth += this._braceDelta(line);
-            if (depthBefore !== 1) continue;
+        const openIdx = body.indexOf('{');
+        if (openIdx === -1) return [];
 
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-
-            // Enum constants are the first depth-1 statement in the body, e.g.
-            // "SUMMER, WINTER, ALL_SEASON;" or "SUMMER(1), WINTER(2);". Whatever
-            // this first statement is, it's either that constant list or the
-            // enum has none - either way there's nothing more to look for.
-            return this.matchEnumConstants(trimmed);
+        // The constant list is everything between the enum's opening brace and
+        // the first top-level ';' (or the enum's own closing brace, if there's
+        // no trailing member section). "Top-level" here means outside any
+        // constructor-arg parens and outside any per-constant anonymous body,
+        // so both of those can safely contain their own commas/semicolons.
+        let segment = '';
+        let parenDepth = 0;
+        let braceDepth = 0;
+        for (let i = openIdx + 1; i < body.length; i++) {
+            const ch = body[i];
+            if (ch === '(') { parenDepth++; segment += ch; continue; }
+            if (ch === ')') { parenDepth--; segment += ch; continue; }
+            if (ch === '{') { braceDepth++; segment += ch; continue; }
+            if (ch === '}') {
+                if (braceDepth === 0) break; // enum's own closing brace
+                braceDepth--; segment += ch; continue;
+            }
+            if (ch === ';' && parenDepth === 0 && braceDepth === 0) break;
+            segment += ch;
         }
-        return [];
+
+        return this.matchEnumConstants(segment);
     }
 
-    matchEnumConstants(trimmed) {
-        let body = trimmed;
-        if (body.endsWith(';')) body = body.slice(0, -1);
-        else if (body.endsWith(',')) body = body.slice(0, -1);
-        if (!body || /[{}]/.test(body) || /^@/.test(body)) return [];
+    matchEnumConstants(segment) {
+        const trimmed = segment.trim();
+        if (!trimmed) return [];
 
-        const parts = body.split(',').map(s => s.trim()).filter(Boolean);
-        if (!parts.length) return [];
+        // Split on top-level commas only, so a constant's constructor args
+        // (e.g. "PLUS(1, 2)") or anonymous body don't get split apart.
+        const parts = [];
+        let current = '';
+        let parenDepth = 0;
+        let braceDepth = 0;
+        for (const ch of trimmed) {
+            if (ch === '(') parenDepth++;
+            else if (ch === ')') parenDepth--;
+            else if (ch === '{') braceDepth++;
+            else if (ch === '}') braceDepth--;
 
-        const constantPattern = /^([A-Z][A-Za-z0-9_]*)(?:\([^)]*\))?$/;
-        if (!parts.every(p => constantPattern.test(p))) return [];
+            if (ch === ',' && parenDepth === 0 && braceDepth === 0) {
+                parts.push(current);
+                current = '';
+            } else {
+                current += ch;
+            }
+        }
+        if (current.trim()) parts.push(current);
 
-        return parts.map(p => ({
-            name: p.match(constantPattern)[1],
+        const constants = [];
+        for (const rawPart of parts) {
+            const parsed = this._parseEnumConstantName(rawPart.trim());
+            if (!parsed) return []; // not a clean constant list - bail entirely
+            constants.push(parsed);
+        }
+
+        return constants.map(({ name, hasOverride }) => ({
+            name,
             type: '',
             visibility: '+',
             isStatic: true,
-            isEnumConstant: true
+            isEnumConstant: true,
+            hasOverride
         }));
+    }
+
+    // Parses a single constant entry - NAME, optionally followed by balanced
+    // (constructor args) and/or a balanced { anonymous body } - and returns
+    // its name plus whether it carries its own body (i.e. overrides a
+    // method), or null if anything is left over unaccounted for.
+    _parseEnumConstantName(part) {
+        const nameMatch = part.match(/^([A-Z][A-Za-z0-9_]*)/);
+        if (!nameMatch) return null;
+        let rest = part.slice(nameMatch[0].length).trim();
+
+        rest = this._skipBalanced(rest, '(', ')');
+        if (rest === null) return null;
+
+        const hasOverride = rest.startsWith('{');
+        rest = this._skipBalanced(rest, '{', '}');
+        if (rest === null) return null;
+
+        return rest === '' ? { name: nameMatch[1], hasOverride } : null;
+    }
+
+    // If `s` starts with `open`, consumes up to its matching `close` and
+    // returns the remainder (trimmed). Returns `s` unchanged if it doesn't
+    // start with `open`, or null if the brackets never balance.
+    _skipBalanced(s, open, close) {
+        if (!s.startsWith(open)) return s;
+        let depth = 0;
+        for (let i = 0; i < s.length; i++) {
+            if (s[i] === open) depth++;
+            else if (s[i] === close) {
+                depth--;
+                if (depth === 0) return s.slice(i + 1).trim();
+            }
+        }
+        return null;
     }
 
     matchField(line) {
