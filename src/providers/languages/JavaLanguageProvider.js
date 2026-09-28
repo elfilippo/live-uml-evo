@@ -7,15 +7,34 @@ const NON_FIELD_STARTS = new Set([
     'case', 'default', 'else', 'this', 'super', 'yield'
 ]);
 
-function stripAngles(text) {
+function splitAngles(text) {
     let depth = 0;
     let out = '';
+    let inner = '';
+    let owner = null;
+    const args = {};
     for (const ch of text) {
-        if (ch === '<') depth++;
-        else if (ch === '>') depth = Math.max(0, depth - 1);
-        else if (depth === 0) out += ch;
+        if (ch === '<') {
+            if (depth === 0) {
+                const m = out.match(/[\w.]+(?=\s*$)/);
+                owner = m ? m[0] : null;
+                inner = '';
+            }
+            depth++;
+            inner += ch;
+        } else if (ch === '>') {
+            if (depth > 0) {
+                depth--;
+                inner += ch;
+                if (depth === 0 && owner) args[owner] = inner.replace(/\s+/g, ' ');
+            }
+        } else if (depth > 0) {
+            inner += ch;
+        } else {
+            out += ch;
+        }
     }
-    return out;
+    return { text: out, args };
 }
 
 class JavaLanguageProvider extends BaseLanguageProvider {
@@ -220,7 +239,7 @@ class JavaLanguageProvider extends BaseLanguageProvider {
     }
 
     matchClassStart(line) {
-        const trimmed = stripAngles(line.trim());
+        const { text: trimmed, args } = splitAngles(line.trim());
         // matches: public abstract class MyClass extends Parent<String> implements Iface1, Iface2 {
         const classPattern = /^\s*((?:(?:public|protected|private|static|final|abstract)\s+)*)(class|interface|enum)\s+(\w+)(?:\s+extends\s+([\w.]+(?:\s*,\s*[\w.]+)*))?(?:\s+implements\s+([\w\s,.]+))?\s*\{?/;
         const match = trimmed.match(classPattern);
@@ -228,11 +247,16 @@ class JavaLanguageProvider extends BaseLanguageProvider {
             const modifiers = match[1] || '';
             const extended = match[4] ? match[4].split(',').map(s => s.trim()).filter(Boolean) : [];
             const interfaces = match[5] ? match[5].split(',').map(s => s.trim()).filter(Boolean) : [];
+            const supertypeArgs = {};
+            [...extended, ...interfaces].forEach(name => {
+                if (args[name]) supertypeArgs[name] = args[name];
+            });
             return {
                 name: match[3],
                 parent: extended[0] || null,
                 extraParents: extended.slice(1),
                 interfaces: interfaces,
+                supertypeArgs: supertypeArgs,
                 isInterface: match[2] === 'interface',
                 isEnum: match[2] === 'enum',
                 isAbstract: /\babstract\b/.test(modifiers)
