@@ -6,6 +6,17 @@ function escapeMermaid(text) {
     return String(text).replace(/[{}[\]<>]/g, '_');
 }
 
+function typeArgsLabel(cls, superName) {
+    const args = cls.supertypeArgs && cls.supertypeArgs[superName];
+    if (!args) return '';
+    const text = args
+        .replace(/</g, '\u2039')
+        .replace(/>/g, '\u203A')
+        .replace(/&/g, '')
+        .replace(/[{}[\]~:]/g, '_');
+    return ` : ${text}`;
+}
+
 function normalizeMembers(raw) {
     if (!Array.isArray(raw)) return [];
     return raw.map(member => {
@@ -216,7 +227,7 @@ class ClassProvider extends MermaidDiagramProvider {
             const escChild = escapeMermaid(c.name);
             if (c.parent && displayClasses.has(c.parent)) {
                 const escParent = escapeMermaid(c.parent);
-                const edge = `${escParent} <|-- ${escChild}`;
+                const edge = `${escParent} <|-- ${escChild}${typeArgsLabel(c, c.parent)}`;
                 if (!renderedEdges.has(edge)) {
                     renderedEdges.add(edge);
                     lines.push(`    ${edge}`);
@@ -226,7 +237,7 @@ class ClassProvider extends MermaidDiagramProvider {
                 c.interfaces.forEach(iface => {
                     if (displayClasses.has(iface)) {
                         const escIface = escapeMermaid(iface);
-                        const edge = `${escIface} <|.. ${escChild}`;
+                        const edge = `${escIface} <|.. ${escChild}${typeArgsLabel(c, iface)}`;
                         if (!renderedEdges.has(edge)) {
                             renderedEdges.add(edge);
                             lines.push(`    ${edge}`);
