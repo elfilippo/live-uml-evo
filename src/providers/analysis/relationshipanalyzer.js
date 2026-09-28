@@ -64,6 +64,11 @@ function findReferencedClasses(rawType, classNames) {
     return found;
 }
 
+function typeArgsFor(cls, rawName) {
+    const args = cls.supertypeArgs && cls.supertypeArgs[rawName];
+    return args ? { typeArgs: args } : {};
+}
+
 function paramNamesOf(cls) {
     const names = new Set();
     (cls.methods || []).forEach(m => {
@@ -208,20 +213,20 @@ class RelationshipAnalyzer {
 
             const parentName = cls.parent ? cls.parent.split('.').pop() : null;
             if (parentName && classByName.has(parentName)) {
-                addEdge(cls.name, parentName, 'inheritance');
+                addEdge(cls.name, parentName, 'inheritance', typeArgsFor(cls, cls.parent));
                 linkedTargets.add(parentName);
             }
             (cls.extraParents || []).forEach(rawParent => {
                 const base = String(rawParent).split('.').pop().trim();
                 if (classByName.has(base)) {
-                    addEdge(cls.name, base, 'inheritance');
+                    addEdge(cls.name, base, 'inheritance', typeArgsFor(cls, rawParent));
                     linkedTargets.add(base);
                 }
             });
             (cls.interfaces || []).forEach(rawIface => {
                 const base = String(rawIface).split('.').pop().trim();
                 if (classByName.has(base)) {
-                    addEdge(cls.name, base, 'realization');
+                    addEdge(cls.name, base, 'realization', typeArgsFor(cls, rawIface));
                     linkedTargets.add(base);
                 }
             });
