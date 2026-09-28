@@ -222,14 +222,16 @@ class JavaLanguageProvider extends BaseLanguageProvider {
     matchClassStart(line) {
         const trimmed = stripAngles(line.trim());
         // matches: public abstract class MyClass extends Parent<String> implements Iface1, Iface2 {
-        const classPattern = /^\s*((?:(?:public|protected|private|static|final|abstract)\s+)*)(class|interface|enum)\s+(\w+)(?:\s+extends\s+([\w.]+))?(?:\s+implements\s+([\w\s,.]+))?\s*\{?/;
+        const classPattern = /^\s*((?:(?:public|protected|private|static|final|abstract)\s+)*)(class|interface|enum)\s+(\w+)(?:\s+extends\s+([\w.]+(?:\s*,\s*[\w.]+)*))?(?:\s+implements\s+([\w\s,.]+))?\s*\{?/;
         const match = trimmed.match(classPattern);
         if (match) {
             const modifiers = match[1] || '';
+            const extended = match[4] ? match[4].split(',').map(s => s.trim()).filter(Boolean) : [];
             const interfaces = match[5] ? match[5].split(',').map(s => s.trim()).filter(Boolean) : [];
             return {
                 name: match[3],
-                parent: match[4] || null,
+                parent: extended[0] || null,
+                extraParents: extended.slice(1),
                 interfaces: interfaces,
                 isInterface: match[2] === 'interface',
                 isEnum: match[2] === 'enum',
