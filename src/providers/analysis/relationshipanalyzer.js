@@ -176,6 +176,13 @@ class RelationshipAnalyzer {
                 addEdge(cls.name, parentName, 'inheritance');
                 linkedTargets.add(parentName);
             }
+            (cls.extraParents || []).forEach(rawParent => {
+                const base = String(rawParent).split('.').pop().trim();
+                if (classByName.has(base)) {
+                    addEdge(cls.name, base, 'inheritance');
+                    linkedTargets.add(base);
+                }
+            });
             (cls.interfaces || []).forEach(rawIface => {
                 const base = String(rawIface).split('.').pop().trim();
                 if (classByName.has(base)) {
