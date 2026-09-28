@@ -2,7 +2,7 @@
     "name": "live-uml-evo",
     "displayName": "Live Uml Evo",
     "description": "Forked from @codenaveed. Live PlantUML flowchart, sequence diagram, state machine and class diagram for C, C++, Java, JavaScript, TypeScript, and Python code & full project diagram editor",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "publisher": "elfilippo",
     "repository": {
         "type": "git",
