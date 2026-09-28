@@ -17,6 +17,7 @@ function normalizeMembers(raw) {
             visibility: typeof visibility === 'string' && visibility.length === 1 ? visibility : '+',
             isStatic: !!member.isStatic,
             isAbstract: !!member.isAbstract,
+            isFinal: !!member.isFinal,
             isEnumConstant: !!member.isEnumConstant,
             hasOverride: !!member.hasOverride
         };
@@ -37,6 +38,7 @@ function formatParams(params) {
 function decorate(member) {
     let prefix = '';
     if (member.isStatic) prefix += '{static} ';
+    if (member.isFinal) prefix += '{final} ';
     if (member.isAbstract) prefix += '{abstract} ';
     return prefix;
 }
