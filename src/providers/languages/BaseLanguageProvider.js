@@ -77,6 +77,7 @@ class BaseLanguageProvider extends LanguageProvider {
                     classes.push({
                         name: classMatch.name,
                         parent: classMatch.parent || null,
+                        extraParents: classMatch.extraParents || [],
                         interfaces: classMatch.interfaces || [],
                         isInterface: classMatch.isInterface || false,
                         isEnum: classMatch.isEnum || false,
@@ -122,6 +123,7 @@ class BaseLanguageProvider extends LanguageProvider {
                 classes.push({
                     name: classMatch.name,
                     parent: classMatch.parent || null,
+                    extraParents: classMatch.extraParents || [],
                     interfaces: classMatch.interfaces || [],
                     isInterface: classMatch.isInterface || false,
                     isEnum: classMatch.isEnum || false,
