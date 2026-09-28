@@ -234,7 +234,8 @@ class JavaLanguageProvider extends BaseLanguageProvider {
             name: match[3],
             type: type,
             visibility: this.visibilityOf(modifiers, '~'),
-            isStatic: /\bstatic\b/.test(modifiers)
+            isStatic: /\bstatic\b/.test(modifiers),
+            isFinal: /\bfinal\b/.test(modifiers)
         };
     }
 
