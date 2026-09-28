@@ -214,6 +214,7 @@ class ProjectClassProvider {
             if (rel.multiplicity === "*") edge += '"*" ';
             edge += rel.to;
             const labelParts = [];
+            if (rel.typeArgs) labelParts.push(rel.typeArgs);
             if (rel.label) labelParts.push(rel.label);
             if (rel.confidence === "low") labelParts.push("≈");
             if (labelParts.length > 0) edge += ` : ${labelParts.join(" ")}`;
