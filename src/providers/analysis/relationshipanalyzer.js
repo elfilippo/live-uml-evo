@@ -23,10 +23,10 @@
  *    parameters, return type, or body (a static call, a local variable, a
  *    cast, etc.), when that pair isn't already linked by inheritance,
  *    realization, or a field relationship — "uses", not "owns".
- *  - Realization to a generic interface (`implements Comparable<Car>`) still
- *    resolves against the base interface name; a known class named inside
- *    the generic argument gets its own dependency edge instead of being
- *    dropped.
+ *  - Realization resolves against the interface name with any package prefix
+ *    dropped. The provider strips generic arguments from `parent` and
+ *    `interfaces`, so a known class named only inside a generic argument
+ *    (`implements Comparable<Car>`) is picked up by the body dependency scan.
  *  - A class's own generic bound (`class Fleet<T extends Vehicle>`) produces
  *    an inheritance-like edge to the bound type — it's explicit in source,
  *    not a heuristic.
@@ -131,24 +131,9 @@ function collectDependencies(cls, classNames, alreadyLinked) {
     return Array.from(deps);
 }
 
-// Splits a realized type that carries its own generic arguments
-// (`Comparable<Car>` -> base `Comparable`, args `Car`) so a generic
-// realization isn't dropped just because the raw string doesn't match a
-// plain class name.
-function splitGenericReference(rawRef) {
-    const str = String(rawRef || '');
-    const baseMatch = str.match(/^\s*([\w.]+)/);
-    const base = baseMatch ? baseMatch[1].split('.').pop() : str.trim();
-    const argsMatch = str.match(/<([\s\S]+)>/);
-    return { base, args: argsMatch ? argsMatch[1] : '' };
-}
-
 // A class's own declaration can bound its type parameter to another known
 // class (`class Fleet<T extends Vehicle>`) — an explicit, exact relationship
-// in source, not a heuristic one, so it's treated like inheritance. Only
-// matches this `extends`-bound style; if a provider's `body` doesn't include
-// the class's own declaration line verbatim, this simply finds nothing, same
-// as before.
+// in source, not a heuristic one, so it's treated like inheritance.
 function extractGenericBoundTargets(cls, classNames) {
     const body = cls.body || '';
     const declMatch = body.match(new RegExp(`\\bclass\\s+${escapeRegExp(cls.name)}\\s*<([^>]+)>`));
@@ -186,25 +171,17 @@ class RelationshipAnalyzer {
         for (const cls of classes) {
             const linkedTargets = new Set();
 
-            if (cls.parent && classByName.has(cls.parent)) {
-                addEdge(cls.name, cls.parent, 'inheritance');
-                linkedTargets.add(cls.parent);
+            const parentName = cls.parent ? cls.parent.split('.').pop() : null;
+            if (parentName && classByName.has(parentName)) {
+                addEdge(cls.name, parentName, 'inheritance');
+                linkedTargets.add(parentName);
             }
             (cls.interfaces || []).forEach(rawIface => {
-                const { base, args } = splitGenericReference(rawIface);
+                const base = String(rawIface).split('.').pop().trim();
                 if (classByName.has(base)) {
                     addEdge(cls.name, base, 'realization');
                     linkedTargets.add(base);
                 }
-                // The interface's own type argument (e.g. the `Car` in
-                // `Comparable<Car>`) isn't implemented, but it is used, so it
-                // still earns an edge rather than being silently dropped.
-                findReferencedClasses(args, classNames).forEach(target => {
-                    if (target !== cls.name && !linkedTargets.has(target)) {
-                        addEdge(cls.name, target, 'dependency', { confidence: 'medium' });
-                        linkedTargets.add(target);
-                    }
-                });
             });
 
             extractGenericBoundTargets(cls, classNames).forEach(target => {
