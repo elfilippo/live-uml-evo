@@ -124,11 +124,12 @@ class ProjectClassProvider {
             if (renderedEdges.has(edgeKey)) return;
             renderedEdges.add(edgeKey);
 
-            let edge = `    ${from} ${arrow} ${to}`;
+            let edge = `    ${from} ${arrow} `;
+            if (rel.multiplicity === '*') edge += '"*" ';
+            edge += to;
             const labelParts = [];
             if (rel.label) labelParts.push(rel.label);
-            if (rel.multiplicity === '*') labelParts.push('*');
-            if (rel.confidence === 'low') labelParts.push('?');
+            if (rel.confidence === 'low') labelParts.push('≈');
             if (labelParts.length > 0) edge += ` : ${labelParts.join(' ')}`;
             lines.push(edge);
         });
