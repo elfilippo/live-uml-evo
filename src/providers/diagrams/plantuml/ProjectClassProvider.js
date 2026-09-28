@@ -210,11 +210,12 @@ class ProjectClassProvider {
             if (renderedEdges.has(edgeKey)) return;
             renderedEdges.add(edgeKey);
 
-            let edge = `${rel.from} ${arrow} ${rel.to}`;
+            let edge = `${rel.from} ${arrow} `;
+            if (rel.multiplicity === "*") edge += '"*" ';
+            edge += rel.to;
             const labelParts = [];
             if (rel.label) labelParts.push(rel.label);
-            if (rel.multiplicity === "*") labelParts.push('"*"');
-            if (rel.confidence === "low") labelParts.push("?");
+            if (rel.confidence === "low") labelParts.push("≈");
             if (labelParts.length > 0) edge += ` : ${labelParts.join(" ")}`;
             uml.push(edge);
         });
