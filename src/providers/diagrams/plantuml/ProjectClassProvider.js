@@ -50,7 +50,8 @@ function normalizeMembers(raw) {
                 params: formatParams(member.params !== undefined ? member.params : member.parameters),
                 visibility: typeof visibility === "string" && visibility.length === 1 ? visibility : "+",
                 isStatic: !!member.isStatic,
-                isAbstract: !!member.isAbstract
+                isAbstract: !!member.isAbstract,
+                isFinal: !!member.isFinal
             };
         })
         .filter(Boolean);
@@ -73,6 +74,7 @@ function formatParams(params) {
 function decorate(member) {
     let prefix = "";
     if (member.isStatic) prefix += "{static} ";
+    if (member.isFinal) prefix += "{final} ";
     if (member.isAbstract) prefix += "{abstract} ";
     return prefix;
 }
