@@ -27,9 +27,9 @@
  *    dropped. The provider strips generic arguments from `parent` and
  *    `interfaces`, so a known class named only inside a generic argument
  *    (`implements Comparable<Car>`) is picked up by the body dependency scan.
- *  - A class's own generic bound (`class Fleet<T extends Vehicle>`) produces
- *    an inheritance-like edge to the bound type — it's explicit in source,
- *    not a heuristic.
+ *  - A class's or interface's own generic bounds (`class Fleet<T extends
+ *    Vehicle & Serializable>`) produce an inheritance-like edge to each bound
+ *    type — explicit in source, not a heuristic.
  *  - An enum-typed field produces no ownership edge (it's already visible in
  *    the attribute list); a field bidirectionally mirrored by another class's
  *    field only keeps its ownership diamond on the stronger (composition >
@@ -131,20 +131,55 @@ function collectDependencies(cls, classNames, alreadyLinked) {
     return Array.from(deps);
 }
 
-// A class's own declaration can bound its type parameter to another known
-// class (`class Fleet<T extends Vehicle>`) — an explicit, exact relationship
-// in source, not a heuristic one, so it's treated like inheritance.
-function extractGenericBoundTargets(cls, classNames) {
-    const body = cls.body || '';
-    const declMatch = body.match(new RegExp(`\\bclass\\s+${escapeRegExp(cls.name)}\\s*<([^>]+)>`));
-    if (!declMatch) return [];
-    const bounds = [];
-    const boundRe = /extends\s+([\w.]+)/g;
-    let m;
-    while ((m = boundRe.exec(declMatch[1])) !== null) {
-        bounds.push(m[1].split('.').pop());
+function readTypeParameters(body, name) {
+    const declMatch = new RegExp(`\\b(?:class|interface)\\s+${escapeRegExp(name)}\\s*<`).exec(body);
+    if (!declMatch) return null;
+    const start = declMatch.index + declMatch[0].length;
+    let depth = 1;
+    for (let i = start; i < body.length; i++) {
+        if (body[i] === '<') depth++;
+        else if (body[i] === '>' && --depth === 0) return body.slice(start, i);
     }
-    return bounds.filter(name => name !== cls.name && classNames.includes(name));
+    return null;
+}
+
+function splitTopLevel(text, separator) {
+    const parts = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of text) {
+        if (ch === '<') depth++;
+        else if (ch === '>') depth--;
+        if (ch === separator && depth === 0) {
+            parts.push(current);
+            current = '';
+        } else {
+            current += ch;
+        }
+    }
+    parts.push(current);
+    return parts;
+}
+
+// A class's or interface's own declaration can bound its type parameters to
+// known classes (`class Fleet<T extends Vehicle & Serializable>`) — an
+// explicit, exact relationship in source, not a heuristic one, so it's
+// treated like inheritance. Only the bound's own name counts here; a class
+// named inside a bound's generic argument (`T extends Comparable<Vehicle>`)
+// is left to the body dependency scan.
+function extractGenericBoundTargets(cls, classNames) {
+    const typeParams = readTypeParameters(cls.body || '', cls.name);
+    if (!typeParams) return [];
+    const bounds = new Set();
+    splitTopLevel(typeParams, ',').forEach(param => {
+        const extendsAt = param.search(/\bextends\b/);
+        if (extendsAt < 0) return;
+        splitTopLevel(param.slice(extendsAt + 'extends'.length), '&').forEach(part => {
+            const base = part.replace(/<[\s\S]*$/, '').trim().split('.').pop();
+            if (base && base !== cls.name && classNames.includes(base)) bounds.add(base);
+        });
+    });
+    return Array.from(bounds);
 }
 
 class RelationshipAnalyzer {
