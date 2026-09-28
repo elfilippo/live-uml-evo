@@ -32,6 +32,7 @@ function normalizeMembers(raw) {
             visibility: typeof visibility === 'string' && visibility.length === 1 ? visibility : '+',
             isStatic: !!member.isStatic,
             isAbstract: !!member.isAbstract,
+            isFinal: !!member.isFinal,
             isEnumConstant: !!member.isEnumConstant,
             hasOverride: !!member.hasOverride
         };
@@ -175,7 +176,8 @@ class ClassProvider extends MermaidDiagramProvider {
             fields.forEach(f => {
                 const type = f.type ? `${escapeMermaid(f.type)} ` : '';
                 const marker = f.isStatic ? '$' : '';
-                lines.push(`    ${escapedName} : ${f.visibility}${type}${escapeMermaid(f.name)}${marker}`);
+                const finalMarker = f.isFinal ? '{final} ' : '';
+                lines.push(`    ${escapedName} : ${f.visibility}${finalMarker}${type}${escapeMermaid(f.name)}${marker}`);
             });
 
             methods.forEach(m => {
