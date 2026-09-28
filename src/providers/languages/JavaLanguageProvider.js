@@ -7,6 +7,17 @@ const NON_FIELD_STARTS = new Set([
     'case', 'default', 'else', 'this', 'super', 'yield'
 ]);
 
+function stripAngles(text) {
+    let depth = 0;
+    let out = '';
+    for (const ch of text) {
+        if (ch === '<') depth++;
+        else if (ch === '>') depth = Math.max(0, depth - 1);
+        else if (depth === 0) out += ch;
+    }
+    return out;
+}
+
 class JavaLanguageProvider extends BaseLanguageProvider {
     constructor() {
         super('java');
@@ -209,13 +220,13 @@ class JavaLanguageProvider extends BaseLanguageProvider {
     }
 
     matchClassStart(line) {
-        const trimmed = line.trim();
+        const trimmed = stripAngles(line.trim());
         // matches: public abstract class MyClass extends Parent<String> implements Iface1, Iface2 {
-        const classPattern = /^\s*((?:(?:public|protected|private|static|final|abstract)\s+)*)(class|interface|enum)\s+(\w+)(?:\s+extends\s+(\w+(?:\s*<[^>]*>)?(?:\.[\w<>]+)*))?(?:\s+implements\s+([\w\s,]+))?\s*\{?/;
+        const classPattern = /^\s*((?:(?:public|protected|private|static|final|abstract)\s+)*)(class|interface|enum)\s+(\w+)(?:\s+extends\s+([\w.]+))?(?:\s+implements\s+([\w\s,.]+))?\s*\{?/;
         const match = trimmed.match(classPattern);
         if (match) {
             const modifiers = match[1] || '';
-            const interfaces = match[5] ? match[5].split(',').map(s => s.trim()) : [];
+            const interfaces = match[5] ? match[5].split(',').map(s => s.trim()).filter(Boolean) : [];
             return {
                 name: match[3],
                 parent: match[4] || null,
