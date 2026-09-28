@@ -41,6 +41,11 @@ function decorate(member) {
     return prefix;
 }
 
+function typeArgsLabel(cls, superName) {
+    const args = cls.supertypeArgs && cls.supertypeArgs[superName];
+    return args ? ` : ${args}` : '';
+}
+
 class PlantUMLClassProvider extends PlantUMLDiagramProvider {
     generate(targetClassName, classes, language) {
         const uml = [];
@@ -241,7 +246,7 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
         classes.forEach(c => {
             if (!c.name || !displayClasses.has(c.name)) return;
             if (c.parent && displayClasses.has(c.parent)) {
-                const edge = `${c.parent} <|-- ${c.name}`;
+                const edge = `${c.parent} <|-- ${c.name}${typeArgsLabel(c, c.parent)}`;
                 if (!renderedEdges.has(edge)) {
                     renderedEdges.add(edge);
                     uml.push(edge);
@@ -250,7 +255,7 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
             if (c.interfaces) {
                 c.interfaces.forEach(iface => {
                     if (displayClasses.has(iface)) {
-                        const edge = `${iface} <|.. ${c.name}`;
+                        const edge = `${iface} <|.. ${c.name}${typeArgsLabel(c, iface)}`;
                         if (!renderedEdges.has(edge)) {
                             renderedEdges.add(edge);
                             uml.push(edge);
