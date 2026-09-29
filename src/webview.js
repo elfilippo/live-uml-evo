@@ -1041,7 +1041,10 @@ function getWebviewHtml(extensionVersion) {
                     projectLastAppliedCode: '',
                     projectScopeFolder: null,
                     projectPackages: [],
-                    projectEditorTab: 'code'
+                    projectEditorTab: 'code',
+                    projectMirrorCode: '',
+                    projectRenderMode: 'plantuml',
+                    unsupportedLanguage: null
                 };
 
                 const savedState = vscode.getState();
@@ -1078,7 +1081,8 @@ function getWebviewHtml(extensionVersion) {
                             const hadShell = !!document.getElementById('diagramContainer');
                             const hadItems = Array.isArray(state.functions) && state.functions.length > 0 || Array.isArray(state.classes) && state.classes.length > 0;
                             const willHaveItems = Array.isArray(msg.functions) && msg.functions.length > 0 || Array.isArray(msg.classes) && msg.classes.length > 0;
-                            const structural = !hadShell || !state.hasEditor || (hadItems !== willHaveItems) || (msg.diagramType && msg.diagramType !== state.diagramType) || (msg.diagramMode && msg.diagramMode !== state.diagramMode);
+                            const wasUnsupported = !!state.unsupportedLanguage;
+                            const structural = wasUnsupported || !hadShell || !state.hasEditor || (hadItems !== willHaveItems) || (msg.diagramType && msg.diagramType !== state.diagramType) || (msg.diagramMode && msg.diagramMode !== state.diagramMode);
 
                             state.functions = msg.functions;
                             state.classes = msg.classes || [];
@@ -1089,6 +1093,7 @@ function getWebviewHtml(extensionVersion) {
                             state.diagramMode = msg.diagramMode || state.diagramMode;
                             state.verbose = msg.verbose || false;
                             state.hasEditor = true;
+                            state.unsupportedLanguage = null;
                             state.error = null;
                             verboseLog('state updated:', state.currentFunction, state.currentClass);
                             // While Settings is open, a background structural update would
@@ -1109,6 +1114,25 @@ function getWebviewHtml(extensionVersion) {
                             break;
                         }
                         case 'navUpdate': break;
+                        case 'unsupportedLanguage':
+                            verboseLog('unsupported language: ' + msg.language);
+                            state.unsupportedLanguage = msg.language || 'this';
+                            state.hasEditor = true;
+                            state.functions = [];
+                            state.classes = [];
+                            state.currentFunction = null;
+                            state.currentClass = null;
+                            state.diagramSvg = null;
+                            state.plantUmlCode = null;
+                            state.mermaidCode = null;
+                            state.renderedMermaidSvg = null;
+                            state.isLoading = false;
+                            state.error = null;
+                            state.stateVars = [];
+                            state.activeStateVar = null;
+                            render();
+                            vscode.setState(state);
+                            break;
                         case 'projectEditMode': {
                             if (!msg.active) {
                                 verboseLog('projectEditMode: off');
@@ -1118,20 +1142,25 @@ function getWebviewHtml(extensionVersion) {
                                 break;
                             }
                             verboseLog('projectEditMode: on, isCustom=' + msg.isCustom);
+                            // Only load the panel's code over whatever's already in the
+                            // editor if there's nothing unsaved there to lose — otherwise
+                            // stepping away to another tab and back would silently wipe
+                            // an in-progress edit. Checked against the *previous*
+                            // custom/auto state, before it's overwritten below.
+                            const noLocalDraft = state.projectDraftCode === projectBaselineCode();
                             state.projectEditMode = true;
                             state.projectScopeLabel = msg.scopeLabel || '';
                             state.projectScopeFolder = msg.scopeFolder || null;
                             state.projectPackages = msg.packages || [];
                             state.projectIsCustom = !!msg.isCustom;
-                            // Only load the panel's code over whatever's already in the
-                            // editor if there's nothing unsaved there to lose — otherwise
-                            // stepping away to another tab and back would silently wipe
-                            // an in-progress edit.
-                            const noLocalDraft = state.projectDraftCode === state.projectLastAppliedCode;
+                            state.projectRenderMode = msg.diagramMode === 'mermaid' ? 'mermaid' : 'plantuml';
                             if (noLocalDraft) {
                                 state.projectDiagramMode = msg.diagramMode || 'plantuml';
                                 state.projectDraftCode = msg.code || '';
                                 state.projectLastAppliedCode = msg.isCustom ? (msg.code || '') : '';
+                                state.projectMirrorCode = msg.isCustom ? '' : (msg.code || '');
+                            } else if (!msg.isCustom) {
+                                state.projectMirrorCode = msg.code || '';
                             }
                             render();
                             vscode.setState(state);
@@ -1142,9 +1171,16 @@ function getWebviewHtml(extensionVersion) {
                             // diagram — only applied while the editor is genuinely idle
                             // (no unsaved draft, no active override), so it can never
                             // clobber something the person is mid-editing.
-                            if (!state.projectEditMode || state.projectIsCustom) break;
-                            const noLocalDraft = state.projectDraftCode === state.projectLastAppliedCode;
-                            if (!noLocalDraft) break;
+                            if (!state.projectEditMode) break;
+                            const syncedMode = msg.diagramMode === 'mermaid' ? 'mermaid' : 'plantuml';
+                            if (syncedMode !== state.projectRenderMode) {
+                                state.projectRenderMode = syncedMode;
+                                if (state.projectEditorTab === 'legend') refreshProjectLegend();
+                            }
+                            if (state.projectIsCustom) { vscode.setState(state); break; }
+                            const noLocalDraft = state.projectDraftCode === projectBaselineCode();
+                            state.projectMirrorCode = msg.code || '';
+                            if (!noLocalDraft) { vscode.setState(state); break; }
                             verboseLog('projectDiagramSync: refreshing idle editor from source');
                             state.projectDiagramMode = msg.diagramMode || state.projectDiagramMode;
                             state.projectDraftCode = msg.code || '';
@@ -1205,6 +1241,7 @@ function getWebviewHtml(extensionVersion) {
                         case 'diagram': {
                             const reqId = msg.requestId || 0;
                             verboseLog('diagram: requestId=' + reqId + ', lastRequestId=' + state.lastRequestId + ', svg.length=' + (msg.svg ? msg.svg.length : 0) + ', mermaidCode.length=' + (msg.mermaidCode ? msg.mermaidCode.length : 0));
+                            if (state.unsupportedLanguage) break;
                             if (reqId < (state.lastRequestId || 0) || (msg.diagramType && msg.diagramType !== state.diagramType)) {
                                 verboseLog('diagram: stale or mismatched-type request, ignoring');
                                 break;
@@ -1291,6 +1328,8 @@ function getWebviewHtml(extensionVersion) {
                     if (state.projectEditMode) {
                         app.innerHTML = renderProjectEditor();
                         attachProjectEditorEvents();
+                    } else if (state.unsupportedLanguage) {
+                        app.innerHTML = renderUnsupported();
                     } else if (!state.hasEditor || (Array.isArray(state.functions) && state.functions.length === 0 && Array.isArray(state.classes) && state.classes.length === 0)) {
                         app.innerHTML = renderWelcome();
                     } else {
@@ -1315,6 +1354,19 @@ function getWebviewHtml(extensionVersion) {
                             }
                         }
                     }
+                }
+
+                function renderUnsupported() {
+                    return \`
+                        <div class="welcome fade-in">
+                            <div class="welcome-icon">🚫</div>
+                            <h2>Language not supported</h2>
+                            <p>Live Uml Evo can't analyze <strong>\${escapeHtml(state.unsupportedLanguage)}</strong> files.</p>
+                            <p style="margin-top: 20px; font-size: 11px; color: var(--text-muted);">
+                                Supports: JavaScript, TypeScript, Python, Java, C, C++
+                            </p>
+                        </div>
+                    \`;
                 }
 
                 function renderWelcome() {
@@ -1385,8 +1437,12 @@ function getWebviewHtml(extensionVersion) {
     return out;
 }
 
+function projectBaselineCode() {
+    return state.projectIsCustom ? state.projectLastAppliedCode : state.projectMirrorCode;
+}
+
 function renderProjectEditor() {
-    const hasUnsavedDraft = state.projectDraftCode !== state.projectLastAppliedCode;
+    const hasUnsavedDraft = state.projectDraftCode !== projectBaselineCode();
     const modeLabel = state.projectDiagramMode === 'mermaid' ? 'Mermaid' : 'PlantUML';
     const statusText = hasUnsavedDraft
         ? 'Unapplied changes'
@@ -1460,7 +1516,7 @@ function visGlyph(color, hollow, filled) {
 }
 
 function renderProjectLegend() {
-    const isMermaid = state.projectDiagramMode === 'mermaid';
+    const isMermaid = state.projectRenderMode === 'mermaid';
     let sections;
     if (isMermaid) {
         sections = [
@@ -1508,7 +1564,7 @@ function renderProjectLegend() {
 
 function refreshProjectLegend() {
     const legend = document.getElementById('projLegend');
-    const mode = state.projectDiagramMode === 'mermaid' ? 'mermaid' : 'plantuml';
+    const mode = state.projectRenderMode === 'mermaid' ? 'mermaid' : 'plantuml';
     if (!legend || legend.getAttribute('data-mode') !== mode) render();
 }
 
@@ -1526,7 +1582,7 @@ function updateProjectEditor() {
 }
 
 function refreshProjectEditorToolbar() {
-    const hasUnsavedDraft = state.projectDraftCode !== state.projectLastAppliedCode;
+    const hasUnsavedDraft = state.projectDraftCode !== projectBaselineCode();
     const applyBtn = document.getElementById('projApplyBtn');
     const discardBtn = document.getElementById('projDiscardBtn');
     const resetBtn = document.getElementById('projResetBtn');
@@ -1568,7 +1624,7 @@ function syncProjectEditorScroll(textarea) {
 }
 
 function applyProjectDiagram() {
-    if (state.projectDraftCode === state.projectLastAppliedCode) return;
+    if (state.projectDraftCode === projectBaselineCode()) return;
     verboseLog('applyProjectDiagram');
     state.projectLastAppliedCode = state.projectDraftCode;
     state.projectIsCustom = true;
@@ -1579,7 +1635,8 @@ function applyProjectDiagram() {
 
 function discardProjectDraft() {
     verboseLog('discardProjectDraft');
-    state.projectDraftCode = state.projectLastAppliedCode;
+    if (!state.projectIsCustom) state.projectDiagramMode = state.projectRenderMode;
+    state.projectDraftCode = projectBaselineCode();
     updateProjectEditor();
     vscode.setState(state);
 }
@@ -1589,6 +1646,7 @@ function resetProjectDiagram() {
     state.projectIsCustom = false;
     state.projectDraftCode = '';
     state.projectLastAppliedCode = '';
+    state.projectMirrorCode = '';
     vscode.setState(state);
     vscode.postMessage({ type: 'resetProjectDiagram' });
 }
@@ -1606,6 +1664,7 @@ function changeProjectScope(value) {
     state.projectIsCustom = false;
     state.projectDraftCode = '';
     state.projectLastAppliedCode = '';
+    state.projectMirrorCode = '';
     render();
     vscode.setState(state);
     vscode.postMessage({ type: 'changeProjectScope', scopeFolder: scopeFolder });

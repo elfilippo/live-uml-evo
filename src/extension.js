@@ -18,6 +18,21 @@ let currentLanguage = "";
 let plantUmlServer = null;
 let _typingInProgress = false;
 
+const SUPPORTED_LANGUAGE_IDS = new Set([
+    "java",
+    "python",
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact",
+    "cpp",
+    "c"
+]);
+
+function isSupportedLanguage(languageId) {
+    return SUPPORTED_LANGUAGE_IDS.has(languageId);
+}
+
 class PlantUmlServerManager {
     constructor() {
         this.process = null;
@@ -308,7 +323,10 @@ function activate(context) {
         const files = await vscode.workspace.findFiles(`**/*${ext}`, getClassExcludeGlob());
         const folders = new Set();
         for (const file of files) {
-            const rel = vscode.workspace.asRelativePath(vscode.Uri.joinPath(file, ".."), false);
+            const folderUri = vscode.Uri.joinPath(file, "..");
+            const workspaceFolder = vscode.workspace.getWorkspaceFolder(folderUri);
+            if (workspaceFolder && workspaceFolder.uri.fsPath === folderUri.fsPath) continue;
+            const rel = vscode.workspace.asRelativePath(folderUri, false);
             if (rel && rel !== ".") folders.add(rel);
         }
         return Array.from(folders).sort();
@@ -343,6 +361,7 @@ function activate(context) {
             : ext === ".py" ? "python"
             : ext === ".ts" ? "typescript"
             : ext === ".cpp" || ext === ".cc" || ext === ".cxx" ? "cpp"
+            : ext === ".c" ? "c"
             : "javascript"
         );
     }
@@ -558,6 +577,12 @@ function activate(context) {
             if (!editor) {
                 vscode.window.showWarningMessage(
                     "Open a file first so Live Uml Evo knows which language/project to diagram."
+                );
+                return;
+            }
+            if (!isSupportedLanguage(editor.document.languageId)) {
+                vscode.window.showWarningMessage(
+                    `Live Uml Evo doesn't support ${editor.document.languageId} files. Open a Java, Python, JavaScript, TypeScript, C or C++ file to diagram a project.`
                 );
                 return;
             }
@@ -801,8 +826,10 @@ function activate(context) {
                 return;
             }
             const folderUri = vscode.Uri.joinPath(editor.document.uri, "..");
+            const workspaceFolder = vscode.workspace.getWorkspaceFolder(folderUri);
+            const isWorkspaceRoot = !!workspaceFolder && workspaceFolder.uri.fsPath === folderUri.fsPath;
             const relFolder = vscode.workspace.asRelativePath(folderUri, false);
-            await projectDiagramPanel.show(relFolder);
+            await projectDiagramPanel.show(isWorkspaceRoot ? null : relFolder);
         })
     );
     context.subscriptions.push(
@@ -1158,6 +1185,14 @@ class LiveUmlSidebar {
         logger.log(
             `refresh(): language=${currentLanguage}, uri=${editor.document.uri.toString()}, selectionOnly=${selectionOnly}`
         );
+
+        if (!isSupportedLanguage(currentLanguage)) {
+            logger.log(`refresh(): unsupported language ${currentLanguage}`);
+            this.currentFunctionName = null;
+            this.currentClassName = null;
+            this.post({ type: "unsupportedLanguage", language: currentLanguage });
+            return;
+        }
 
         const functions = parseFunctions(editor.document);
         const classes = parseClasses(editor.document);
