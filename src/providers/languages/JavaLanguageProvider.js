@@ -76,7 +76,19 @@ class JavaLanguageProvider extends BaseLanguageProvider {
     }
 
     createMemberState(body, classMatch) {
-        return { visibility: null, isEnum: !!(classMatch && classMatch.isEnum) };
+        return {
+            visibility: null,
+            isEnum: !!(classMatch && classMatch.isEnum),
+            isInterface: !!(classMatch && classMatch.isInterface)
+        };
+    }
+
+    matchMemberFunction(line, state) {
+        const match = this.matchFunctionStart(line);
+        if (match && state && state.isInterface && !/\b(?:public|private|protected)\b/.test(match.modifiers)) {
+            match.visibility = '+';
+        }
+        return match;
     }
 
     // Enum constants that take constructor args or have a per-constant
@@ -211,7 +223,7 @@ class JavaLanguageProvider extends BaseLanguageProvider {
         return null;
     }
 
-    matchField(line) {
+    matchField(line, state) {
         const trimmed = line.trim();
         if (!trimmed.endsWith(';')) return null;
         if (/^@/.test(trimmed)) return null;
@@ -230,12 +242,13 @@ class JavaLanguageProvider extends BaseLanguageProvider {
         if (declarationHead.includes('(')) return null;
 
         const modifiers = match[1] || '';
+        const inInterface = !!(state && state.isInterface);
         return {
             name: match[3],
             type: type,
-            visibility: this.visibilityOf(modifiers, '~'),
-            isStatic: /\bstatic\b/.test(modifiers),
-            isFinal: /\bfinal\b/.test(modifiers)
+            visibility: this.visibilityOf(modifiers, inInterface ? '+' : '~'),
+            isStatic: inInterface || /\bstatic\b/.test(modifiers),
+            isFinal: inInterface || /\bfinal\b/.test(modifiers)
         };
     }
 
