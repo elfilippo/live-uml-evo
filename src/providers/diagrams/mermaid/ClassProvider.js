@@ -176,8 +176,7 @@ class ClassProvider extends MermaidDiagramProvider {
             fields.forEach(f => {
                 const type = f.type ? `${escapeMermaid(f.type)} ` : '';
                 const marker = f.isStatic ? '$' : '';
-                const finalMarker = f.isFinal ? '{final} ' : '';
-                lines.push(`    ${escapedName} : ${f.visibility}${finalMarker}${type}${escapeMermaid(f.name)}${marker}`);
+                lines.push(`    ${escapedName} : ${f.visibility}${type}${escapeMermaid(f.name)}${f.isFinal ? '°' : ''}${marker}`);
             });
 
             methods.forEach(m => {

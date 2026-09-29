@@ -4,21 +4,23 @@
  * interfaces, fields, methods, body).
  *
  * Inheritance and realization are structural (parent/interfaces) and always
- * exact. Composition, aggregation, and dependency are heuristics inferred from
- * how a field gets its value or how a method uses a type — static analysis
- * can't know true object lifetime, so these come with a `confidence` and are
- * meant to be reviewed/overridden, not treated as ground truth.
+ * exact. Field relationships follow a fixed ownership rule based on how the
+ * class assigns the field, so the same source always yields the same edge.
+ * Dependency edges are a heuristic scan for a type's name and carry a
+ * `confidence`.
  *
- * Heuristic rules:
- *  - Composition (filled diamond): a field assigned `new Target(...)` anywhere
- *    in the class body (declaration-site initializer or inside a constructor).
- *    The owner creates the part, so the part can't outlive the owner.
- *  - Aggregation (hollow diamond): a field assigned from an identifier that is
- *    also a parameter of one of the class's own methods/constructors — the
- *    class received the reference rather than creating it.
- *  - A field that matches neither pattern still becomes an aggregation edge
- *    (the safer, weaker claim) but with confidence 'low', so it's visually
- *    distinguishable and easy to correct or drop.
+ * Ownership rules, in order:
+ *  - Aggregation (hollow diamond): some assignment stores a parameter of one
+ *    of the class's own methods/constructors — directly, through
+ *    `Objects.requireNonNull`, `copyOf`, `Collections.unmodifiable*` or a
+ *    collection copy constructor, or, for collection fields, via
+ *    `field.add(param)` / `field.put(key, param)`. The class received the
+ *    reference rather than creating it.
+ *  - Composition (filled diamond): otherwise, some assignment creates the
+ *    target with `new Target(...)` — for collection fields, an assignment or
+ *    a `field.add(new Target(...))`. The owner creates the part.
+ *  - Association (plain arrow): the field references the target and the
+ *    class body settles neither of the above; nothing more is claimed.
  *  - Dependency (dashed arrow): a class named anywhere in a method's
  *    parameters, return type, or body (a static call, a local variable, a
  *    cast, etc.), when that pair isn't already linked by inheritance,
@@ -73,7 +75,7 @@ function paramNamesOf(cls) {
     const names = new Set();
     (cls.methods || []).forEach(m => {
         const paramsStr = typeof m.params === 'string' ? m.params : '';
-        paramsStr.split(',').forEach(p => {
+        splitTopLevel(paramsStr, ',').forEach(p => {
             const trimmed = p.trim();
             if (!trimmed) return;
             // "String breed" -> "breed"; "const std::string& breed" -> "breed"
@@ -84,39 +86,63 @@ function paramNamesOf(cls) {
     return names;
 }
 
-function classifyFieldOwnership(cls, field, targetClassName, ownParamNames) {
-    const body = cls.body || '';
-    const escName = escapeRegExp(field.name);
-    const escTarget = escapeRegExp(targetClassName);
+const SUPPLIED_WRAPPER = /^(?:(?:\w+\.)*Objects\s*\.\s*requireNonNull|(?:\w+\.)*(?:List|Set|Map)\s*\.\s*copyOf|(?:\w+\.)*Collections\s*\.\s*unmodifiable\w+|new\s+(?:\w+\.)*(?:ArrayList|LinkedList|ArrayDeque|Vector|HashSet|LinkedHashSet|TreeSet|HashMap|LinkedHashMap|TreeMap))\s*\(\s*(\w+)\s*(?:,[^)]*)?\)$/;
 
-    if (isCollectionType(field.type)) {
-        // Collection elements are typically added via a method call
-        // (`wheels.add(new Wheel())`), not assigned directly to the field, so
-        // the anchored check below wouldn't see them. Anywhere in the body is a
-        // weaker but more useful signal for this shape.
-        const newAnywherePattern = new RegExp(`\\bnew\\s+${escTarget}\\b`);
-        if (newAnywherePattern.test(body)) {
-            return { relation: 'composition', confidence: 'medium' };
-        }
-        return { relation: 'aggregation', confidence: 'low' };
+const COLLECTION_ADDERS = 'add|addFirst|addLast|offer|offerFirst|offerLast|push|put|putIfAbsent';
+
+function stripGenerics(text) {
+    let current = text;
+    let previous;
+    do {
+        previous = current;
+        current = current.replace(/<[^<>]*>/g, '');
+    } while (current !== previous);
+    return current;
+}
+
+function lastArgument(text) {
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (ch === '(' || ch === '[' || ch === '{') depth++;
+        else if (ch === ')' || ch === ']' || ch === '}') depth--;
+        else if (ch === ',' && depth === 0) start = i + 1;
     }
+    return text.slice(start).trim();
+}
 
-    const newAssignPattern = new RegExp(`(?:this\\s*\\.\\s*)?\\b${escName}\\s*=\\s*new\\s+${escTarget}\\b`);
-    if (newAssignPattern.test(body)) {
-        return { relation: 'composition', confidence: 'high' };
-    }
-
-    const assignRe = new RegExp(`(?:this\\s*\\.\\s*)?\\b${escName}\\s*=\\s*(\\w+)\\s*;`, 'g');
+function assignedExpressions(body, fieldName, isCollection) {
+    const name = escapeRegExp(fieldName);
+    const expressions = [];
+    const assignRe = new RegExp(`\\b${name}\\s*=(?!=)\\s*([^;]*);`, 'g');
     let match;
     while ((match = assignRe.exec(body)) !== null) {
-        const rhs = match[1];
-        if (rhs === 'new') continue; // already handled above
-        if (ownParamNames.has(rhs)) {
-            return { relation: 'aggregation', confidence: 'high' };
+        expressions.push(stripGenerics(match[1]).trim());
+    }
+    if (isCollection) {
+        const addRe = new RegExp(`\\b${name}\\s*\\.\\s*(?:${COLLECTION_ADDERS})\\s*\\(([^;]*)\\)\\s*;`, 'g');
+        while ((match = addRe.exec(body)) !== null) {
+            expressions.push(lastArgument(stripGenerics(match[1])));
         }
     }
+    return expressions;
+}
 
-    return { relation: 'aggregation', confidence: 'low' };
+function suppliedIdentifier(expression) {
+    const wrapped = SUPPLIED_WRAPPER.exec(expression);
+    if (wrapped) return wrapped[1];
+    return /^\w+$/.test(expression) ? expression : null;
+}
+
+function classifyFieldOwnership(cls, field, targetClassName, ownParamNames) {
+    const expressions = assignedExpressions(cls.body || '', field.name, isCollectionType(field.type));
+    if (expressions.some(expression => ownParamNames.has(suppliedIdentifier(expression)))) {
+        return 'aggregation';
+    }
+    const creates = new RegExp(`\\bnew\\s+${escapeRegExp(targetClassName)}\\b`);
+    if (expressions.some(expression => creates.test(expression))) return 'composition';
+    return 'association';
 }
 
 // A class's use of another type isn't limited to fields and method
@@ -193,7 +219,7 @@ class RelationshipAnalyzer {
      *   isInterface, fields, methods, body) from across the analyzed scope.
      * @returns {{classes: Array, relationships: Array}} relationships:
      *   {from, to, type, label?, multiplicity?, confidence?}
-     *   type is one of: inheritance, realization, composition, aggregation, dependency
+     *   type is one of: inheritance, realization, composition, aggregation, association, dependency
      */
     analyze(classes) {
         const classNames = classes.map(c => c.name);
@@ -257,11 +283,10 @@ class RelationshipAnalyzer {
                         linkedTargets.add(target);
                         return;
                     }
-                    const { relation, confidence } = classifyFieldOwnership(cls, field, target, ownParamNames);
+                    const relation = classifyFieldOwnership(cls, field, target, ownParamNames);
                     addEdge(cls.name, target, relation, {
                         label: field.name,
-                        multiplicity: isCollectionType(field.type) ? '*' : '1',
-                        confidence
+                        multiplicity: isCollectionType(field.type) ? '*' : '1'
                     });
                     linkedTargets.add(target);
                 });
@@ -296,7 +321,7 @@ class RelationshipAnalyzer {
                 loser = reverse;
             }
             loser.type = 'dependency';
-            loser.confidence = 'low';
+            loser.confidence = 'medium';
             delete loser.multiplicity;
         }
 

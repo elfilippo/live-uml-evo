@@ -66,7 +66,8 @@ const ARROW = {
     realization: '..|>',   // from implements to — dashed triangle at the interface (to)
     composition: '*--',    // from owns-and-creates to (filled diamond at from)
     aggregation: 'o--',    // from holds-a-reference-to to (hollow diamond at from)
-    dependency: '..>'      // from uses to (dashed open arrow at to)
+    dependency: '..>',     // from uses to (dashed open arrow at to)
+    association: '-->'
 };
 
 class ProjectClassProvider {
@@ -110,8 +111,7 @@ class ProjectClassProvider {
             fields.forEach(f => {
                 const type = f.type ? `${escapeMermaid(f.type)} ` : '';
                 const marker = f.isStatic ? '$' : '';
-                const finalMarker = f.isFinal ? '{final} ' : '';
-                lines.push(`    ${escapedName} : ${f.visibility}${finalMarker}${type}${escapeMermaid(f.name)}${marker}`);
+                lines.push(`    ${escapedName} : ${f.visibility}${type}${escapeMermaid(f.name)}${f.isFinal ? '°' : ''}${marker}`);
             });
             methods.forEach(m => {
                 const type = m.type ? ` ${escapeMermaid(m.type)}` : '';
@@ -140,7 +140,6 @@ class ProjectClassProvider {
             const labelParts = [];
             if (rel.typeArgs) labelParts.push(formatTypeArgs(rel.typeArgs));
             if (rel.label) labelParts.push(rel.label);
-            if (rel.confidence === 'low') labelParts.push('≈');
             if (labelParts.length > 0) edge += ` : ${labelParts.join(' ')}`;
             lines.push(edge);
         });

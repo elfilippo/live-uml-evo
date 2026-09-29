@@ -38,7 +38,6 @@ function formatParams(params) {
 function decorate(member) {
     let prefix = '';
     if (member.isStatic) prefix += '{static} ';
-    if (member.isFinal) prefix += '{final} ';
     if (member.isAbstract) prefix += '{abstract} ';
     return prefix;
 }
@@ -198,7 +197,7 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
             if (constants.length > 0 && (fields.length > 0 || methods.length > 0)) uml.push('  --');
 
             fields.forEach(f => {
-                uml.push(`  ${f.visibility}${decorate(f)}${f.name}${f.type ? ` : ${f.type}` : ''}`);
+                uml.push(`  ${f.visibility}${decorate(f)}${f.name}${f.isFinal ? '°' : ''}${f.type ? ` : ${f.type}` : ''}`);
             });
 
             if (fields.length > 0 && methods.length > 0) uml.push('  --');

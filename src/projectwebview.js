@@ -102,8 +102,10 @@ function getProjectWebviewHtml(extensionVersion, sidebarLocation) {
             .sw-composition { background: #c0392b; }
             .sw-aggregation::before { content: '\\25C7'; position: absolute; left: -8px; top: -7px; color: #27ae60; font-size: 11px; }
             .sw-aggregation { background: #27ae60; }
+            .sw-association::after { content: '\\25B8'; position: absolute; right: -4px; top: -7px; color: #7f8c8d; font-size: 11px; }
+            .sw-association { background: #7f8c8d; }
             .sw-dependency { background: repeating-linear-gradient(90deg, #8e44ad 0 4px, transparent 4px 7px); }
-            .confidence-note { font-style: italic; }
+            .legend-note { font-style: italic; }
             .diagram-wrapper { flex: 1; position: relative; min-height: 0; }
             .diagram-container {
                 /* Was display:flex + justify-content:center, which has a
@@ -183,8 +185,9 @@ function getProjectWebviewHtml(extensionVersion, sidebarLocation) {
                 <div class="legend-item"><span class="legend-swatch sw-realization"></span> Realization (interface)</div>
                 <div class="legend-item"><span class="legend-swatch sw-composition"></span> Composition (owns)</div>
                 <div class="legend-item"><span class="legend-swatch sw-aggregation"></span> Aggregation (has-a)</div>
+                <div class="legend-item"><span class="legend-swatch sw-association"></span> Association (references)</div>
                 <div class="legend-item"><span class="legend-swatch sw-dependency"></span> Dependency (uses)</div>
-                <div class="legend-item confidence-note">? = inferred, not certain \u2014 click a class to check its source</div>
+                <div class="legend-item legend-note">&deg; = final field</div>
                 <button class="header-collapse-toggle" id="headerCollapseToggle" onclick="toggleHeader()" title="Collapse to just the title and overview">\u25b2</button>
             </div>
             <div class="diagram-wrapper">

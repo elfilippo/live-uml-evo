@@ -74,7 +74,6 @@ function formatParams(params) {
 function decorate(member) {
     let prefix = "";
     if (member.isStatic) prefix += "{static} ";
-    if (member.isFinal) prefix += "{final} ";
     if (member.isAbstract) prefix += "{abstract} ";
     return prefix;
 }
@@ -87,7 +86,8 @@ const ARROW = {
     realization: "..|>",
     composition: "*--",
     aggregation: "o--",
-    dependency: "..>"
+    dependency: "..>",
+    association: "-->"
 };
 
 // A tiny seedable PRNG (mulberry32) rather than Math.random(), so a given
@@ -191,7 +191,7 @@ class ProjectClassProvider {
             const fields = normalizeMembers(c.fields);
             const methods = normalizeMembers(c.methods);
             fields.forEach((f) => {
-                uml.push(`  ${f.visibility}${decorate(f)}${f.name}${f.type ? ` : ${f.type}` : ""}`);
+                uml.push(`  ${f.visibility}${decorate(f)}${f.name}${f.isFinal ? "°" : ""}${f.type ? ` : ${f.type}` : ""}`);
             });
             if (fields.length > 0 && methods.length > 0) uml.push("  --");
             methods.forEach((m) => {
@@ -218,7 +218,6 @@ class ProjectClassProvider {
             const labelParts = [];
             if (rel.typeArgs) labelParts.push(rel.typeArgs);
             if (rel.label) labelParts.push(rel.label);
-            if (rel.confidence === "low") labelParts.push("≈");
             if (labelParts.length > 0) edge += ` : ${labelParts.join(" ")}`;
             uml.push(edge);
         });
