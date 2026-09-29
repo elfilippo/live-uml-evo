@@ -142,6 +142,7 @@ class BaseLanguageProvider extends LanguageProvider {
         const methods = [];
         const fields = [];
         const seenMethods = new Set();
+        const seenSignatures = new Set();
         const seenFields = new Set();
         const lines = body.split('\n');
         const braceBased = this.language !== 'python';
@@ -163,7 +164,9 @@ class BaseLanguageProvider extends LanguageProvider {
             const method = this.matchMemberFunction(line, state);
             if (method && method.name) {
                 const signature = this.describeMethod(line, method, state);
-                if (!seenMethods.has(signature.name)) {
+                const key = `${signature.name}(${signature.params})`;
+                if (!seenSignatures.has(key)) {
+                    seenSignatures.add(key);
                     seenMethods.add(signature.name);
                     methods.push(signature);
                 }
