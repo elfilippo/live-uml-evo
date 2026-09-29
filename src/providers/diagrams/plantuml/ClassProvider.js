@@ -42,6 +42,14 @@ function decorate(member) {
     return prefix;
 }
 
+function inheritedOf(cls) {
+    return [cls.parent, ...(cls.extraParents || [])].filter(Boolean);
+}
+
+function extendsClass(cls, name) {
+    return inheritedOf(cls).includes(name) || !!(cls.interfaces && cls.interfaces.includes(name));
+}
+
 function typeArgsLabel(cls, superName) {
     const args = cls.supertypeArgs && cls.supertypeArgs[superName];
     return args ? ` : ${args}` : '';
@@ -86,7 +94,7 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
             const cls = classes.find(c => c.name === className);
             if (cls) {
                 result.add(className);
-                if (cls.parent) findAncestors(cls.parent, result);
+                inheritedOf(cls).forEach(parent => findAncestors(parent, result));
                 if (cls.interfaces) cls.interfaces.forEach(iface => findAncestors(iface, result));
             } else {
                 result.add(className);
@@ -100,7 +108,7 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
             visited.add(className);
             result.add(className);
             classes.forEach(c => {
-                if (c.parent === className || (c.interfaces && c.interfaces.includes(className))) {
+                if (extendsClass(c, className)) {
                     findDescendants(c.name, result, visited);
                 }
             });
@@ -128,11 +136,11 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
 
             // 3. Immediate Siblings: Only classes that share the exact same parent/interfaces.
             //    Provides immediate context for siblings without traversing down their trees.
-            if (targetClass.parent) {
+            inheritedOf(targetClass).forEach(parent => {
                 classes.forEach(c => {
-                    if (c.parent === targetClass.parent) displaySet.add(c.name);
+                    if (inheritedOf(c).includes(parent)) displaySet.add(c.name);
                 });
-            }
+            });
             if (targetClass.interfaces) {
                 targetClass.interfaces.forEach(iface => {
                     classes.forEach(c => {
@@ -148,7 +156,7 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
             currentDisplay.forEach(name => {
                 const cls = classes.find(c => c.name === name);
                 if (cls) {
-                    if (cls.parent) displaySet.add(cls.parent);
+                    inheritedOf(cls).forEach(parent => displaySet.add(parent));
                     if (cls.interfaces) cls.interfaces.forEach(i => displaySet.add(i));
                 }
             });
@@ -212,13 +220,15 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
 
             // Count hidden subclasses
             classes.forEach(other => {
-                if (other.parent === c.name || (other.interfaces && other.interfaces.includes(c.name))) {
+                if (extendsClass(other, c.name)) {
                     if (!displaySet.has(other.name)) hiddenSubclasses++;
                 }
             });
 
             // Count hidden parents/interfaces
-            if (c.parent && !displaySet.has(c.parent)) hiddenParents++;
+            inheritedOf(c).forEach(parent => {
+                if (!displaySet.has(parent)) hiddenParents++;
+            });
             if (c.interfaces) {
                 c.interfaces.forEach(i => {
                     if (!displaySet.has(i)) hiddenParents++;
@@ -246,13 +256,15 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
         const renderedEdges = new Set();
         classes.forEach(c => {
             if (!c.name || !displayClasses.has(c.name)) return;
-            if (c.parent && displayClasses.has(c.parent)) {
-                const edge = `${c.parent} <|-- ${c.name}${typeArgsLabel(c, c.parent)}`;
-                if (!renderedEdges.has(edge)) {
-                    renderedEdges.add(edge);
-                    uml.push(edge);
+            inheritedOf(c).forEach(parent => {
+                if (displayClasses.has(parent)) {
+                    const edge = `${parent} <|-- ${c.name}${typeArgsLabel(c, parent)}`;
+                    if (!renderedEdges.has(edge)) {
+                        renderedEdges.add(edge);
+                        uml.push(edge);
+                    }
                 }
-            }
+            });
             if (c.interfaces) {
                 c.interfaces.forEach(iface => {
                     if (displayClasses.has(iface)) {

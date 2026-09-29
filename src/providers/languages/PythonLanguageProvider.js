@@ -1,6 +1,26 @@
 const BaseLanguageProvider = require('./BaseLanguageProvider');
 const StatementParser = require('../utils/StatementParser');
 
+const ENUM_BASES = new Set(['Enum', 'IntEnum', 'StrEnum', 'Flag', 'IntFlag', 'ReprEnum']);
+
+function splitTopLevel(text) {
+    const parts = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of text) {
+        if (ch === '[' || ch === '(') depth++;
+        else if (ch === ']' || ch === ')') depth--;
+        if (ch === ',' && depth === 0) {
+            parts.push(current);
+            current = '';
+        } else {
+            current += ch;
+        }
+    }
+    parts.push(current);
+    return parts;
+}
+
 class PythonLanguageProvider extends BaseLanguageProvider {
     constructor() {
         super('python');
@@ -47,13 +67,17 @@ class PythonLanguageProvider extends BaseLanguageProvider {
                     const methods = this.extractMethods(classBody.body);
                     // Python has no "abstract" keyword: a class reads as abstract when it
                     // derives from ABC/ABCMeta, or declares an @abstractmethod.
-                    const bases = [classMatch.parent, ...(classMatch.interfaces || [])].filter(Boolean);
-                    const isAbstract = bases.includes('ABC') || bases.includes('ABCMeta') || /@abstractmethod\b/.test(classBody.body);
+                    const bases = [classMatch.parent, ...(classMatch.extraParents || [])].filter(Boolean);
+                    const isAbstract = bases.some(base => /(?:^|\.)(?:ABC|ABCMeta)$/.test(base))
+                        || /\bmetaclass\s*=\s*(?:\w+\.)*ABCMeta\b/.test(line)
+                        || /@abstractmethod\b/.test(classBody.body);
                     classes.push({
                         name: classMatch.name,
                         parent: classMatch.parent || null,
-                        interfaces: classMatch.interfaces || [],
+                        extraParents: classMatch.extraParents || [],
+                        interfaces: [],
                         isInterface: classMatch.isInterface || false,
+                        isEnum: classMatch.isEnum || false,
                         isAbstract: isAbstract,
                         startLine: i,
                         body: classBody.body,
@@ -71,15 +95,20 @@ class PythonLanguageProvider extends BaseLanguageProvider {
 
     matchClassStart(line) {
         const trimmed = line.trim();
-        // matches: class MyClass(Parent1, Parent2):
-        const classPattern = /^\s*class\s+(\w+)(?:\(([\w\s,]+)\))?\s*:(?:\s*#.*)?$/;
+        // matches: class MyClass(Parent1, pkg.Parent2, Generic[T], metaclass=Meta):
+        const classPattern = /^\s*class\s+(\w+)(?:\s*\[[^\]]*\])?\s*(?:\((.*)\))?\s*:(?:\s*#.*)?$/;
         const match = trimmed.match(classPattern);
         if (match) {
-            const parents = match[2] ? match[2].split(',').map(s => s.trim()) : [];
+            const parents = match[2] ? splitTopLevel(match[2])
+                .map(s => s.trim())
+                .filter(s => s && !/^\*/.test(s) && !/^\w+\s*=(?!=)/.test(s))
+                .map(s => s.replace(/\[[\s\S]*$/, '').trim())
+                .filter(s => s && s.split('.').pop() !== 'Generic') : [];
             return {
                 name: match[1],
                 parent: parents[0] || null,
-                interfaces: parents.slice(1)
+                extraParents: parents.slice(1),
+                isEnum: parents.some(p => ENUM_BASES.has(p.split('.').pop()))
             };
         }
         return null;

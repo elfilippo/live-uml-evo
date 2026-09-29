@@ -48,7 +48,11 @@ function escapeRegExp(text) {
 function isCollectionType(rawType) {
     if (!rawType) return false;
     return /\b(List|ArrayList|LinkedList|Set|HashSet|TreeSet|LinkedHashSet|Collection|Map|HashMap|TreeMap|LinkedHashMap|Vector|Queue|Deque|ArrayDeque|Stack|vector|array|Array)\b/.test(rawType)
-        || /\[\s*\]/.test(rawType);
+        || /\[[^\]]*\]/.test(rawType);
+}
+
+function baseName(rawName) {
+    return String(rawName).split(/::|\./).pop().trim();
 }
 
 // Finds every known class name that appears as a whole word anywhere in a raw
@@ -76,8 +80,13 @@ function paramNamesOf(cls) {
     (cls.methods || []).forEach(m => {
         const paramsStr = typeof m.params === 'string' ? m.params : '';
         splitTopLevel(paramsStr, ',').forEach(p => {
-            const trimmed = p.trim();
+            const trimmed = p.replace(/=(?!>)[\s\S]*$/, '').trim();
             if (!trimmed) return;
+            const typed = /^(?:\.\.\.)?(\w+)\??\s*:(?!:)/.exec(trimmed);
+            if (typed) {
+                names.add(typed[1]);
+                return;
+            }
             // "String breed" -> "breed"; "const std::string& breed" -> "breed"
             const last = trimmed.split(/\s+/).pop().replace(/^[*&]+/, '').replace(/[^\w]/g, '');
             if (last) names.add(last);
@@ -237,20 +246,20 @@ class RelationshipAnalyzer {
         for (const cls of classes) {
             const linkedTargets = new Set();
 
-            const parentName = cls.parent ? cls.parent.split('.').pop() : null;
+            const parentName = cls.parent ? baseName(cls.parent) : null;
             if (parentName && classByName.has(parentName)) {
                 addEdge(cls.name, parentName, 'inheritance', typeArgsFor(cls, cls.parent));
                 linkedTargets.add(parentName);
             }
             (cls.extraParents || []).forEach(rawParent => {
-                const base = String(rawParent).split('.').pop().trim();
+                const base = baseName(rawParent);
                 if (classByName.has(base)) {
                     addEdge(cls.name, base, 'inheritance', typeArgsFor(cls, rawParent));
                     linkedTargets.add(base);
                 }
             });
             (cls.interfaces || []).forEach(rawIface => {
-                const base = String(rawIface).split('.').pop().trim();
+                const base = baseName(rawIface);
                 if (classByName.has(base)) {
                     addEdge(cls.name, base, 'realization', typeArgsFor(cls, rawIface));
                     linkedTargets.add(base);

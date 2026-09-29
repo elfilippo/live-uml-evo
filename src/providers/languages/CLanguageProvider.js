@@ -1,5 +1,23 @@
 const BaseLanguageProvider = require('./BaseLanguageProvider');
 
+function splitBases(text) {
+    const parts = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of text) {
+        if (ch === '<') depth++;
+        else if (ch === '>') depth--;
+        if (ch === ',' && depth === 0) {
+            parts.push(current);
+            current = '';
+        } else {
+            current += ch;
+        }
+    }
+    parts.push(current);
+    return parts;
+}
+
 const C_KEYWORDS = new Set([
     'return', 'if', 'else', 'while', 'for', 'switch', 'case', 'break', 'continue',
     'goto', 'typedef', 'using', 'namespace', 'template', 'friend', 'delete', 'new',
@@ -181,7 +199,7 @@ class CLanguageProvider extends BaseLanguageProvider {
         if (/^(?:public|private|protected)\s*:/.test(trimmed)) return null;
         if (/^\s*(?:using|typedef|friend|template|return|struct|class|enum|union)\b/.test(trimmed)) return null;
 
-        const fieldPattern = /^((?:(?:static|mutable|const|constexpr|volatile|inline|unsigned|signed|long|short)\s+)*)([\w:]+(?:\s*<[^>]*>)?)\s*([*&]*)\s*(\w+)\s*((?:\[[^\]]*\])*)\s*(?:=\s*[^;]*|\{[^}]*\})?;$/;
+        const fieldPattern = /^((?:(?:static|mutable|const|constexpr|volatile|inline|unsigned|signed|long|short)\s+)*)([\w:]+(?:\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?)\s*([*&]*)\s*(\w+)\s*((?:\[[^\]]*\])*)\s*(?:=\s*[^;]*|\{[^}]*\})?;$/;
         const match = trimmed.match(fieldPattern);
         if (!match) return null;
 
@@ -204,19 +222,27 @@ class CLanguageProvider extends BaseLanguageProvider {
 
     matchClassStart(line) {
         const trimmed = line.trim();
+        if (trimmed.split('{')[0].includes(';')) return null;
         // matches: class MyClass : public Parent1, public Parent2 {
         // Also handles template bases (Base<int>) and namespace-qualified (NS::Base)
-        const classPattern = /^\s*(?:class|struct)\s+(\w+)(?:\s*:\s*([^{]+))?\s*\{?/;
+        const classPattern = /^\s*(?:class|struct)\s+(\w+)(?:\s+final)?(?:\s*:\s*([^{]+))?\s*\{?/;
         const match = trimmed.match(classPattern);
         if (match) {
-            const inheritPart = match[2];
-            const bases = inheritPart ? inheritPart.split(',').map(p => {
-                return p.trim().replace(/^(?:public|protected|private|virtual)\s+/, '').trim();
+            const supertypeArgs = {};
+            const bases = match[2] ? splitBases(match[2]).map(p => {
+                const base = p.trim().replace(/^(?:(?:public|protected|private|virtual)\s+)+/, '').trim();
+                const open = base.indexOf('<');
+                if (open < 0) return base;
+                const name = base.slice(0, open).trim();
+                supertypeArgs[name] = base.slice(open).trim();
+                return name;
             }).filter(Boolean) : [];
             return {
                 name: match[1],
                 parent: bases[0] || null,
-                interfaces: bases.slice(1)
+                extraParents: bases.slice(1),
+                interfaces: [],
+                supertypeArgs
             };
         }
         return null;

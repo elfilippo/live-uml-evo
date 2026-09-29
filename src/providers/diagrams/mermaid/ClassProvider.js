@@ -6,6 +6,14 @@ function escapeMermaid(text) {
     return String(text).replace(/[{}[\]<>]/g, '_');
 }
 
+function inheritedOf(cls) {
+    return [cls.parent, ...(cls.extraParents || [])].filter(Boolean);
+}
+
+function extendsClass(cls, name) {
+    return inheritedOf(cls).includes(name) || !!(cls.interfaces && cls.interfaces.includes(name));
+}
+
 function typeArgsLabel(cls, superName) {
     const args = cls.supertypeArgs && cls.supertypeArgs[superName];
     if (!args) return '';
@@ -68,7 +76,7 @@ class ClassProvider extends MermaidDiagramProvider {
             const cls = classes.find(c => c.name === className);
             if (cls) {
                 result.add(className);
-                if (cls.parent) findAncestors(cls.parent, result);
+                inheritedOf(cls).forEach(parent => findAncestors(parent, result));
                 if (cls.interfaces) cls.interfaces.forEach(iface => findAncestors(iface, result));
             } else {
                 result.add(className);
@@ -81,7 +89,7 @@ class ClassProvider extends MermaidDiagramProvider {
             visited.add(className);
             result.add(className);
             classes.forEach(c => {
-                if (c.parent === className || (c.interfaces && c.interfaces.includes(className))) {
+                if (extendsClass(c, className)) {
                     findDescendants(c.name, result, visited);
                 }
             });
@@ -95,11 +103,11 @@ class ClassProvider extends MermaidDiagramProvider {
             findAncestors(targetClass.name, displaySet);
             findDescendants(targetClass.name, displaySet);
 
-            if (targetClass.parent) {
+            inheritedOf(targetClass).forEach(parent => {
                 classes.forEach(c => {
-                    if (c.parent === targetClass.parent) displaySet.add(c.name);
+                    if (inheritedOf(c).includes(parent)) displaySet.add(c.name);
                 });
-            }
+            });
             if (targetClass.interfaces) {
                 targetClass.interfaces.forEach(iface => {
                     classes.forEach(c => {
@@ -112,7 +120,7 @@ class ClassProvider extends MermaidDiagramProvider {
             currentDisplay.forEach(name => {
                 const cls = classes.find(c => c.name === name);
                 if (cls) {
-                    if (cls.parent) displaySet.add(cls.parent);
+                    inheritedOf(cls).forEach(parent => displaySet.add(parent));
                     if (cls.interfaces) cls.interfaces.forEach(i => displaySet.add(i));
                 }
             });
@@ -193,12 +201,14 @@ class ClassProvider extends MermaidDiagramProvider {
             let hiddenParents = 0;
 
             classes.forEach(other => {
-                if (other.parent === c.name || (other.interfaces && other.interfaces.includes(c.name))) {
+                if (extendsClass(other, c.name)) {
                     if (!displaySet.has(other.name)) hiddenSubclasses++;
                 }
             });
 
-            if (c.parent && !displaySet.has(c.parent)) hiddenParents++;
+            inheritedOf(c).forEach(parent => {
+                if (!displaySet.has(parent)) hiddenParents++;
+            });
             if (c.interfaces) {
                 c.interfaces.forEach(i => {
                     if (!displaySet.has(i)) hiddenParents++;
@@ -226,14 +236,16 @@ class ClassProvider extends MermaidDiagramProvider {
         classes.forEach(c => {
             if (!c.name || !displayClasses.has(c.name)) return;
             const escChild = escapeMermaid(c.name);
-            if (c.parent && displayClasses.has(c.parent)) {
-                const escParent = escapeMermaid(c.parent);
-                const edge = `${escParent} <|-- ${escChild}${typeArgsLabel(c, c.parent)}`;
-                if (!renderedEdges.has(edge)) {
-                    renderedEdges.add(edge);
-                    lines.push(`    ${edge}`);
+            inheritedOf(c).forEach(parent => {
+                if (displayClasses.has(parent)) {
+                    const escParent = escapeMermaid(parent);
+                    const edge = `${escParent} <|-- ${escChild}${typeArgsLabel(c, parent)}`;
+                    if (!renderedEdges.has(edge)) {
+                        renderedEdges.add(edge);
+                        lines.push(`    ${edge}`);
+                    }
                 }
-            }
+            });
             if (c.interfaces) {
                 c.interfaces.forEach(iface => {
                     if (displayClasses.has(iface)) {

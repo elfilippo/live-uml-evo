@@ -2,6 +2,48 @@ const BaseLanguageProvider = require('./BaseLanguageProvider');
 
 const FIELD_MODIFIERS = '(?:(?:public|private|protected|static|readonly|declare|override|abstract)\\s+)*';
 
+function splitTopLevel(text) {
+    const parts = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of text) {
+        if (ch === '<' || ch === '(' || ch === '[') depth++;
+        else if (ch === '>' || ch === ')' || ch === ']') depth--;
+        if (ch === ',' && depth === 0) {
+            parts.push(current);
+            current = '';
+        } else {
+            current += ch;
+        }
+    }
+    parts.push(current);
+    return parts;
+}
+
+function skipTypeParameters(text) {
+    const start = text.search(/\S/);
+    if (start < 0 || text[start] !== '<') return text;
+    let depth = 0;
+    for (let i = start; i < text.length; i++) {
+        if (text[i] === '<') depth++;
+        else if (text[i] === '>' && --depth === 0) return text.slice(i + 1);
+    }
+    return '';
+}
+
+function parseSupertypes(text, supertypeArgs) {
+    const names = [];
+    splitTopLevel(text).forEach(part => {
+        const item = part.trim();
+        const name = item.replace(/[<(][\s\S]*$/, '').trim();
+        if (!name) return;
+        names.push(name);
+        const open = item.indexOf('<');
+        if (open >= 0) supertypeArgs[name] = item.slice(open).trim();
+    });
+    return names;
+}
+
 class JavaScriptLanguageProvider extends BaseLanguageProvider {
     constructor() {
         super('javascript');
@@ -121,18 +163,25 @@ class JavaScriptLanguageProvider extends BaseLanguageProvider {
     matchClassStart(line) {
         const trimmed = line.trim();
         // matches: export default class MyClass extends Parent<Type> {
-        // matches: interface MyIface extends Parent {
+        // matches: interface MyIface extends Parent, Other {
         // matches: enum MyEnum {  (TypeScript)
-        // matches: export abstract class MyClass {  (TypeScript)
-        const classPattern = /^\s*((?:export|default|class|interface|enum|abstract|\s)*)\s*(class|interface|enum)\s+(\w+)(?:\s+extends\s+(\w+(?:\s*<[^>]*>)?(?:\.[\w<>]+)*))?(?:\s+implements\s+([\w\s,]+))?\s*\{?/;
+        // matches: export abstract class MyClass<T> implements Foo<T>, Bar {  (TypeScript)
+        const classPattern = /^\s*((?:export|default|class|interface|enum|abstract|\s)*)\s*(class|interface|enum)\s+(\w+)/;
         const match = trimmed.match(classPattern);
         if (match) {
             const modifiers = match[1] || '';
-            const interfaces = match[5] ? match[5].split(',').map(s => s.trim()) : [];
+            const clauses = skipTypeParameters(trimmed.slice(match[0].length)).split('{')[0];
+            const supertypeArgs = {};
+            const extendsMatch = /\bextends\s+([\s\S]*?)(?=\bimplements\b|$)/.exec(clauses);
+            const implementsMatch = /\bimplements\s+([\s\S]*)$/.exec(clauses);
+            const parents = extendsMatch ? parseSupertypes(extendsMatch[1], supertypeArgs) : [];
+            const interfaces = implementsMatch ? parseSupertypes(implementsMatch[1], supertypeArgs) : [];
             return {
                 name: match[3],
-                parent: match[4] || null,
+                parent: parents[0] || null,
+                extraParents: parents.slice(1),
                 interfaces: interfaces,
+                supertypeArgs: supertypeArgs,
                 isInterface: match[2] === 'interface',
                 isEnum: match[2] === 'enum',
                 isAbstract: /\babstract\b/.test(modifiers)
