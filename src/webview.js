@@ -905,6 +905,71 @@ function getWebviewHtml(extensionVersion) {
                 color: var(--text-muted);
                 flex-shrink: 0;
             }
+
+            .project-legend {
+                flex: 1;
+                min-height: 0;
+                overflow-y: auto;
+                padding: 10px 12px;
+            }
+
+            .legend-section {
+                margin-bottom: 14px;
+            }
+
+            .legend-heading {
+                font-size: 10px;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                color: var(--text-muted);
+                margin-bottom: 6px;
+                padding-bottom: 4px;
+                border-bottom: 1px solid var(--border);
+            }
+
+            .legend-hint {
+                font-size: 10px;
+                color: var(--text-muted);
+                margin: 0 0 6px;
+            }
+
+            .legend-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 3px 0;
+                font-size: 11px;
+                color: var(--text-secondary);
+            }
+
+            .legend-glyph {
+                flex: 0 0 104px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                color: var(--text-primary);
+                font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+                font-size: 11px;
+            }
+
+            .legend-text {
+                flex: 1;
+                min-width: 0;
+            }
+
+            .uml-badge {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                font-family: sans-serif;
+                font-size: 10px;
+                font-weight: 700;
+                color: #000000;
+            }
         </style>
         </head>
         <body>
@@ -975,7 +1040,8 @@ function getWebviewHtml(extensionVersion) {
                     projectDraftCode: '',
                     projectLastAppliedCode: '',
                     projectScopeFolder: null,
-                    projectPackages: []
+                    projectPackages: [],
+                    projectEditorTab: 'code'
                 };
 
                 const savedState = vscode.getState();
@@ -1334,10 +1400,19 @@ function renderProjectEditor() {
         }))
         .join('');
 
-    return [
+    const onLegend = state.projectEditorTab === 'legend';
+    const head = [
         '<div class="project-editor">',
         '<div class="header"><div class="header-title">Live Uml Evo</div>',
         '<div class="header-stats">' + modeLabel + ' \\u00B7 Project Diagram</div></div>',
+        '<div class="mode-tabs" id="projEditorTabs">',
+        '<button class="tab' + (onLegend ? '' : ' active') + '" onclick="showProjectCodeTab()">Code</button>',
+        '<button class="tab' + (onLegend ? ' active' : '') + '" onclick="showProjectLegendTab()">Legend</button>',
+        '</div>'
+    ].join('');
+    if (onLegend) return head + renderProjectLegend() + '</div>';
+    return [
+        head,
         '<div class="project-editor-scope">',
         '<select class="function-select" id="projScopeSelect" onchange="changeProjectScope(this.value)">' + scopeOptions + '</select>',
         (state.projectIsCustom ? '<span class="project-editor-custom-flag">custom</span>' : ''),
@@ -1355,10 +1430,93 @@ function renderProjectEditor() {
     ].join('');
 }
 
+function setProjectEditorTab(tab) {
+    if (state.projectEditorTab === tab) return;
+    state.projectEditorTab = tab;
+    render();
+    vscode.setState(state);
+}
+
+function showProjectCodeTab() { setProjectEditorTab('code'); }
+
+function showProjectLegendTab() { setProjectEditorTab('legend'); }
+
+function legendRow(glyph, text) {
+    return '<div class="legend-row"><span class="legend-glyph">' + glyph + '</span><span class="legend-text">' + text + '</span></div>';
+}
+
+function legendSection(title, hint, rows) {
+    return '<div class="legend-section"><div class="legend-heading">' + title + '</div>'
+        + (hint ? '<p class="legend-hint">' + hint + '</p>' : '')
+        + rows.join('') + '</div>';
+}
+
+function umlBadge(letter, color) {
+    return '<span class="uml-badge" style="background:' + color + '">' + letter + '</span>';
+}
+
+function visGlyph(color, hollow, filled) {
+    return '<span style="color:' + color + '">' + hollow + ' ' + filled + '</span>';
+}
+
+function renderProjectLegend() {
+    const isMermaid = state.projectDiagramMode === 'mermaid';
+    let sections;
+    if (isMermaid) {
+        sections = [
+            legendSection('Class kinds', 'Shown as a label above the class name.', [
+                legendRow('&lt;&lt;interface&gt;&gt;', 'Interface'),
+                legendRow('&lt;&lt;enumeration&gt;&gt;', 'Enum'),
+                legendRow('&lt;&lt;abstract&gt;&gt;', 'Abstract class'),
+                legendRow('(no label)', 'Concrete class')
+            ]),
+            legendSection('Visibility', 'The symbol in front of each member.', [
+                legendRow('+', 'Public'),
+                legendRow('-', 'Private'),
+                legendRow('#', 'Protected'),
+                legendRow('~', 'Package-private')
+            ]),
+            legendSection('Modifiers', null, [
+                legendRow('<u>count</u>', 'Static member'),
+                legendRow('<i>run()</i>', 'Abstract method'),
+                legendRow('id&deg;', 'Final field (&deg; after the name)')
+            ])
+        ];
+    } else {
+        sections = [
+            legendSection('Class kinds', 'The colored circle in each class header.', [
+                legendRow(umlBadge('C', '#ADD1B2'), 'Class'),
+                legendRow(umlBadge('A', '#A9DCDF'), 'Abstract class'),
+                legendRow(umlBadge('I', '#B4A7E5'), 'Interface'),
+                legendRow(umlBadge('E', '#EB937F'), 'Enum')
+            ]),
+            legendSection('Visibility', 'Hollow icon = field, filled icon = method.', [
+                legendRow(visGlyph('#C82930', '&#9633;', '&#9632;'), 'Private'),
+                legendRow(visGlyph('#B38D00', '&#9671;', '&#9670;'), 'Protected'),
+                legendRow(visGlyph('#1963A0', '&#9651;', '&#9650;'), 'Package-private'),
+                legendRow(visGlyph('#038048', '&#9675;', '&#9679;'), 'Public')
+            ]),
+            legendSection('Modifiers', null, [
+                legendRow('<u>count</u>', 'Static member'),
+                legendRow('<i>run()</i>', 'Abstract member'),
+                legendRow('id&deg;', 'Final field (&deg; after the name)')
+            ])
+        ];
+    }
+    return '<div class="project-legend" id="projLegend" data-mode="' + (isMermaid ? 'mermaid' : 'plantuml') + '">' + sections.join('') + '</div>';
+}
+
+function refreshProjectLegend() {
+    const legend = document.getElementById('projLegend');
+    const mode = state.projectDiagramMode === 'mermaid' ? 'mermaid' : 'plantuml';
+    if (!legend || legend.getAttribute('data-mode') !== mode) render();
+}
+
 // Patches the editor in place on incoming syncs so a live-idle mirror
 // update never steals focus or resets scroll/caret position the way a
 // full render() would.
 function updateProjectEditor() {
+    if (state.projectEditorTab === 'legend') { refreshProjectLegend(); return; }
     const textarea = document.getElementById('projEditorInput');
     const highlight = document.querySelector('#projEditorHighlight code');
     if (!textarea || !highlight) { render(); return; }
