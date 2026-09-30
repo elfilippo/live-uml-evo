@@ -8,7 +8,7 @@ const fs = require('fs');
 const http = require('http');
 const zlib = require('zlib');
 const net = require('net');
-const registry = require('./TRegistry');
+const registry = require('./Registry');
 const LineParser = require('./providers/utils/LineParser');
 const _lineParser = new LineParser();
 const extractStatements = (body, language) => _lineParser.parseStatements(body, language);
@@ -139,7 +139,7 @@ function plantumlEncode(text) {
     return encode64(compressed);
 }
 
-const logger = require('./TLogger');
+const logger = require('./Logger');
 
 async function generatePlantUMLSVGServer(plantUmlCode, serverUrl) {
     const encoded = plantumlEncode(plantUmlCode);

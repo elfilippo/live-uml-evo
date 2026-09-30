@@ -1,17 +1,17 @@
 const vscode = require("vscode");
 const core = require("./Core.js");
-const registry = require("./TRegistry.js");
+const registry = require("./Registry.js");
 const { spawn } = require("child_process");
-const { getWebviewHtml } = require("./TWebview.js");
+const { getWebviewHtml } = require("./Webview.js");
 const crypto = require("crypto");
 const path = require("path");
 const tsProvider = require("./providers/utils/TreeSitterProvider.js");
-const Visualizer = require("./TVisualizer.js");
-const logger = require("./TLogger.js");
-const RelationshipAnalyzer = require("./providers/analysis/TRelationshipAnalyzer.js");
+const Visualizer = require("./Visualizer.js");
+const logger = require("./Logger.js");
+const RelationshipAnalyzer = require("./providers/analysis/RelationshipAnalyzer.js");
 const MermaidProjectClassProvider = require("./providers/diagrams/mermaid/ProjectClassProvider.js");
 const PlantUMLProjectClassProvider = require("./providers/diagrams/plantuml/ProjectClassProvider.js");
-const { getProjectWebviewHtml } = require("./TProjectWebview.js");
+const { getProjectWebviewHtml } = require("./ProjectWebview.js");
 
 let sidebarProvider = null;
 let currentLanguage = "";
