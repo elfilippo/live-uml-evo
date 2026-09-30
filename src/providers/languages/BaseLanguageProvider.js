@@ -87,7 +87,9 @@ class BaseLanguageProvider extends LanguageProvider {
                         body: classBody.body,
                         endLine: classBody.endLine,
                         methods: members.methods,
-                        fields: members.fields
+                        fields: members.fields,
+                        paramLists: members.paramLists || [],
+                        language: this.language
                     });
                     i = classBody.endLine + 1;
                     continue;

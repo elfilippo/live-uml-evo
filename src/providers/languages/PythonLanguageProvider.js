@@ -21,6 +21,35 @@ function splitTopLevel(text) {
     return parts;
 }
 
+function normalizeAnnotation(text) {
+    return text.trim()
+        .replace(/^['"]|['"]$/g, '')
+        .replace(/^(?:typing\.)?ClassVar\[([\s\S]*)\]$/, '$1')
+        .replace(/^(?:typing\.)?Optional\[([\s\S]*)\]$/, '$1')
+        .replace(/\s*\|\s*None\b|\bNone\s*\|\s*/g, '')
+        .trim();
+}
+
+function inferType(expression, paramTypes) {
+    const value = expression.replace(/\s+#.*$/, '').trim();
+    if (!value) return '';
+    const lead = /^(\w+)\s+(?:or|if)\b/.exec(value) || /^(\w+)$/.exec(value);
+    if (lead && paramTypes.has(lead[1])) return paramTypes.get(lead[1]);
+    const call = /\b([A-Z]\w*)\s*\(/.exec(value);
+    if (value.startsWith('[')) return call ? `list[${call[1]}]` : 'list';
+    if (value.startsWith('{')) return 'dict';
+    if (/^[frbFRB]{0,2}['"]/.test(value)) return 'str';
+    if (/^-?\d+$/.test(value)) return 'int';
+    if (/^-?\d*\.\d+$/.test(value)) return 'float';
+    if (/^(?:True|False)$/.test(value)) return 'bool';
+    return call ? call[1] : '';
+}
+
+function fieldVisibility(name) {
+    if (name.startsWith('__')) return '-';
+    return name.startsWith('_') ? '#' : '+';
+}
+
 class PythonLanguageProvider extends BaseLanguageProvider {
     constructor() {
         super('python');
@@ -65,6 +94,8 @@ class PythonLanguageProvider extends BaseLanguageProvider {
                 const classBody = this.extractClassBody(cleanedLines, i);
                 if (classBody) {
                     const methods = this.extractMethods(classBody.body);
+                    const fields = this.extractFields(classBody.body, classMatch);
+                    const paramLists = this._paramLists(classBody.body);
                     // Python has no "abstract" keyword: a class reads as abstract when it
                     // derives from ABC/ABCMeta, or declares an @abstractmethod.
                     const bases = [classMatch.parent, ...(classMatch.extraParents || [])].filter(Boolean);
@@ -82,7 +113,10 @@ class PythonLanguageProvider extends BaseLanguageProvider {
                         startLine: i,
                         body: classBody.body,
                         endLine: classBody.endLine,
-                        methods: methods
+                        methods: methods,
+                        fields: fields,
+                        paramLists: paramLists,
+                        language: this.language
                     });
                     i = classBody.endLine + 1;
                     continue;
@@ -140,6 +174,99 @@ class PythonLanguageProvider extends BaseLanguageProvider {
             }
         }
         return methods;
+    }
+
+    extractFields(body, classMatch = null) {
+        const lines = body.split('\n');
+        const classIndent = lines[0].match(/^(\s*)/)[1].length;
+        const paramTypes = this._paramTypes(this._paramLists(body));
+        const isEnum = !!(classMatch && classMatch.isEnum);
+        const fields = [];
+        const seen = new Set();
+        const add = (name, type, isStatic) => {
+            if (seen.has(name) || /^__\w+__$/.test(name)) return;
+            seen.add(name);
+            fields.push({ name, type, visibility: fieldVisibility(name), isStatic });
+        };
+
+        let bodyIndent = null;
+        let inDocstring = false;
+        for (const line of lines.slice(1)) {
+            const quotes = (line.match(/"{3}|'{3}/g) || []).length;
+            const wasInDocstring = inDocstring;
+            if (quotes % 2 === 1) inDocstring = !inDocstring;
+            if (wasInDocstring || quotes > 0) continue;
+
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const indent = line.match(/^(\s*)/)[1].length;
+            if (bodyIndent === null && indent > classIndent) bodyIndent = indent;
+
+            if (indent === bodyIndent && !isEnum) {
+                const annotated = /^(\w+)\s*:\s*([^=\s][^=]*?)\s*(?:=\s*(.*))?$/.exec(trimmed);
+                if (annotated) {
+                    add(annotated[1], normalizeAnnotation(annotated[2]), /^(?:typing\.)?ClassVar\b/.test(annotated[2]));
+                    continue;
+                }
+                const plain = /^(\w+)\s*=(?!=)\s*(.*)$/.exec(trimmed);
+                if (plain) {
+                    add(plain[1], inferType(plain[2], paramTypes), true);
+                    continue;
+                }
+            }
+
+            const instance = /^self\.(\w+)\s*(?::\s*([^=]+?))?\s*=(?!=)\s*(.*)$/.exec(trimmed);
+            if (instance) {
+                add(instance[1], instance[2] ? normalizeAnnotation(instance[2]) : inferType(instance[3], paramTypes), false);
+            }
+        }
+
+        fields.forEach(field => {
+            if (field.type && !/^(?:list|set|dict|tuple|deque)$/.test(field.type)) return;
+            const element = this._elementType(body, field.name, paramTypes);
+            if (element) field.type = `${field.type || 'list'}[${element}]`;
+        });
+        return fields;
+    }
+
+    _elementType(body, name, paramTypes) {
+        const pattern = new RegExp(`\\bself\\.${name}\\s*\\.\\s*(?:append|appendleft|add|insert|extend)\\s*\\(([^\\n]*)\\)`, 'g');
+        let match;
+        while ((match = pattern.exec(body)) !== null) {
+            const argument = splitTopLevel(match[1]).pop().trim();
+            const type = paramTypes.get(argument) || (/\b([A-Z]\w*)\s*\(/.exec(argument) || [])[1];
+            if (type) return type;
+        }
+        return '';
+    }
+
+    _paramLists(body) {
+        const lists = [];
+        const pattern = /^[ \t]*(?:async\s+)?def\s+\w+\s*\(/gm;
+        let match;
+        while ((match = pattern.exec(body)) !== null) {
+            const open = match.index + match[0].length - 1;
+            let depth = 0;
+            for (let i = open; i < body.length; i++) {
+                if (body[i] === '(') depth++;
+                else if (body[i] === ')' && --depth === 0) {
+                    lists.push(body.slice(open + 1, i).replace(/\s+/g, ' ').trim());
+                    break;
+                }
+            }
+        }
+        return lists;
+    }
+
+    _paramTypes(paramLists) {
+        const types = new Map();
+        paramLists.forEach(list => splitTopLevel(list).forEach(param => {
+            const match = /^\*{0,2}(\w+)\s*:\s*([^=]+?)\s*(?:=.*)?$/.exec(param.trim());
+            if (match && match[1] !== 'self' && match[1] !== 'cls' && !types.has(match[1])) {
+                types.set(match[1], normalizeAnnotation(match[2]));
+            }
+        }));
+        return types;
     }
 }
 

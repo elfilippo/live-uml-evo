@@ -12,13 +12,19 @@
  * Ownership rules, in order:
  *  - Aggregation (hollow diamond): some assignment stores a parameter of one
  *    of the class's own methods/constructors — directly, through
- *    `Objects.requireNonNull`, `copyOf`, `Collections.unmodifiable*` or a
- *    collection copy constructor, or, for collection fields, via
- *    `field.add(param)` / `field.put(key, param)`. The class received the
+ *    `Objects.requireNonNull`, `copyOf`, `Collections.unmodifiable*`, a
+ *    collection copy constructor, `std::move`, or a `param or default` /
+ *    `param ?? default` fallback, or, for collection fields, via
+ *    `field.add(param)` / `field.put(key, param)` / `field.append(param)` /
+ *    `field.push_back(param)`. C++ member-initializer lists count as
+ *    assignments, as do TypeScript constructor parameter properties
+ *    (`constructor(private engine: Engine)`). The class received the
  *    reference rather than creating it.
  *  - Composition (filled diamond): otherwise, some assignment creates the
- *    target with `new Target(...)` — for collection fields, an assignment or
- *    a `field.add(new Target(...))`. The owner creates the part.
+ *    target with `new Target(...)`, `std::make_unique<Target>(...)` /
+ *    `std::make_shared<Target>(...)` or, in Python, `Target(...)` — for
+ *    collection fields, an assignment or an add/append/push_back of one. The
+ *    owner creates the part.
  *  - Association (plain arrow): the field references the target and the
  *    class body settles neither of the above; nothing more is claimed.
  *  - Dependency (dashed arrow): a class named anywhere in a method's
@@ -75,29 +81,36 @@ function typeArgsFor(cls, rawName) {
     return args ? { typeArgs: args } : {};
 }
 
+const NON_CLASS_TYPE = /^(?:(?:const|final|unsigned|signed|long|short|volatile)\s+)*(?:int|long|short|char|bool|boolean|byte|float|double|size_t|std::size_t|std::string|string|String|str|number|bigint|u?int\d+_t)\s*[&*]*$/;
+
+function collectParamNames(paramsStr, names) {
+    splitTopLevel(paramsStr, ',').forEach(p => {
+        const trimmed = p.replace(/=(?!>)[\s\S]*$/, '').trim();
+        if (!trimmed) return;
+        const typed = /^(?:\.\.\.)?(\w+)\??\s*:(?!:)([\s\S]*)$/.exec(trimmed);
+        if (typed) {
+            if (!NON_CLASS_TYPE.test(typed[2].trim())) names.add(typed[1]);
+            return;
+        }
+        // "String breed" -> "breed"; "const std::string& breed" -> "breed"
+        const tokens = trimmed.split(/\s+/);
+        const last = tokens.pop().replace(/^[*&]+/, '').replace(/[^\w]/g, '');
+        if (last && !NON_CLASS_TYPE.test(tokens.join(' '))) names.add(last);
+    });
+}
+
 function paramNamesOf(cls) {
     const names = new Set();
-    (cls.methods || []).forEach(m => {
-        const paramsStr = typeof m.params === 'string' ? m.params : '';
-        splitTopLevel(paramsStr, ',').forEach(p => {
-            const trimmed = p.replace(/=(?!>)[\s\S]*$/, '').trim();
-            if (!trimmed) return;
-            const typed = /^(?:\.\.\.)?(\w+)\??\s*:(?!:)/.exec(trimmed);
-            if (typed) {
-                names.add(typed[1]);
-                return;
-            }
-            // "String breed" -> "breed"; "const std::string& breed" -> "breed"
-            const last = trimmed.split(/\s+/).pop().replace(/^[*&]+/, '').replace(/[^\w]/g, '');
-            if (last) names.add(last);
-        });
-    });
+    (cls.methods || []).forEach(m => collectParamNames(typeof m.params === 'string' ? m.params : '', names));
+    (cls.paramLists || []).forEach(params => collectParamNames(params, names));
     return names;
 }
 
-const SUPPLIED_WRAPPER = /^(?:(?:\w+\.)*Objects\s*\.\s*requireNonNull|(?:\w+\.)*(?:List|Set|Map)\s*\.\s*copyOf|(?:\w+\.)*Collections\s*\.\s*unmodifiable\w+|new\s+(?:\w+\.)*(?:ArrayList|LinkedList|ArrayDeque|Vector|HashSet|LinkedHashSet|TreeSet|HashMap|LinkedHashMap|TreeMap))\s*\(\s*(\w+)\s*(?:,[^)]*)?\)$/;
+const SUPPLIED_WRAPPER = /^(?:(?:\w+\.)*Objects\s*\.\s*requireNonNull|(?:\w+\.)*(?:List|Set|Map)\s*\.\s*copyOf|(?:\w+\.)*Collections\s*\.\s*unmodifiable\w+|new\s+(?:\w+\.)*(?:ArrayList|LinkedList|ArrayDeque|Vector|HashSet|LinkedHashSet|TreeSet|HashMap|LinkedHashMap|TreeMap)|(?:std::)?(?:move|forward|shared_ptr|unique_ptr)|(?:copy\.)?(?:deep)?copy|list|set|dict|tuple|frozenset)\s*\(\s*(\w+)\s*(?:,[^)]*)?\)$/;
 
-const COLLECTION_ADDERS = 'add|addFirst|addLast|offer|offerFirst|offerLast|push|put|putIfAbsent';
+const COLLECTION_ADDERS = 'add|addFirst|addLast|offer|offerFirst|offerLast|push|put|putIfAbsent|push_back|push_front|insert';
+
+const PYTHON_ADDERS = 'append|appendleft|extend|add|insert|setdefault';
 
 function stripGenerics(text) {
     let current = text;
@@ -121,19 +134,87 @@ function lastArgument(text) {
     return text.slice(start).trim();
 }
 
-function assignedExpressions(body, fieldName, isCollection) {
+function normalizeCreation(text) {
+    return text.replace(/\b(?:std::)?make_(?:unique|shared)\s*<\s*([\w:]+)\s*(?:<[^<>]*>)?\s*>\s*\(/g, 'new $1(');
+}
+
+function prepareExpression(text) {
+    return stripGenerics(normalizeCreation(text)).trim();
+}
+
+function pythonExpression(text) {
+    return text.replace(/\s+#.*$/, '').trim();
+}
+
+function closingIndex(text, open) {
+    let depth = 0;
+    for (let i = open; i < text.length; i++) {
+        const ch = text[i];
+        if (ch === '(' || ch === '[' || ch === '{') depth++;
+        else if ((ch === ')' || ch === ']' || ch === '}') && --depth === 0) return i;
+    }
+    return -1;
+}
+
+function initializerListExpressions(body, fieldName) {
+    const found = [];
+    const head = /\)\s*(?:noexcept\s*)?:(?!:)\s*/g;
+    const entryStart = /\s*([\w:]+)\s*(?:<[^<>]*>)?\s*[({]/y;
+    const separator = /\s*([,{])/y;
+    let match;
+    while ((match = head.exec(body)) !== null) {
+        const entries = [];
+        let complete = false;
+        let pos = match.index + match[0].length;
+        for (;;) {
+            entryStart.lastIndex = pos;
+            const entry = entryStart.exec(body);
+            if (!entry) break;
+            const open = pos + entry[0].length - 1;
+            const close = closingIndex(body, open);
+            if (close < 0) break;
+            entries.push({ name: entry[1], text: body.slice(open + 1, close) });
+            separator.lastIndex = close + 1;
+            const next = separator.exec(body);
+            if (!next) break;
+            if (next[1] === '{') {
+                complete = true;
+                break;
+            }
+            pos = separator.lastIndex;
+        }
+        if (complete) entries.filter(e => e.name === fieldName).forEach(e => found.push(e.text));
+    }
+    return found;
+}
+
+function assignedExpressions(cls, fieldName, isCollection) {
+    const body = cls.body || '';
     const name = escapeRegExp(fieldName);
     const expressions = [];
-    const assignRe = new RegExp(`\\b${name}\\s*=(?!=)\\s*([^;]*);`, 'g');
-    let match;
-    while ((match = assignRe.exec(body)) !== null) {
-        expressions.push(stripGenerics(match[1]).trim());
-    }
-    if (isCollection) {
-        const addRe = new RegExp(`\\b${name}\\s*\\.\\s*(?:${COLLECTION_ADDERS})\\s*\\(([^;]*)\\)\\s*;`, 'g');
-        while ((match = addRe.exec(body)) !== null) {
-            expressions.push(lastArgument(stripGenerics(match[1])));
+    const collect = (re, transform) => {
+        let match;
+        while ((match = re.exec(body)) !== null) expressions.push(transform(match[1]));
+    };
+
+    if (cls.language === 'python') {
+        const target = `\\bself\\.${name}`;
+        collect(new RegExp(`${target}\\s*(?::[^=\\n]+)?=(?!=)[ \\t]*([^\\n]*)`, 'g'), pythonExpression);
+        if (isCollection) {
+            collect(new RegExp(`${target}\\s*\\[[^\\]\\n]*\\]\\s*=(?!=)[ \\t]*([^\\n]*)`, 'g'), pythonExpression);
+            collect(new RegExp(`${target}\\s*\\.\\s*(?:${PYTHON_ADDERS})\\s*\\(([^\\n]*)\\)`, 'g'), lastArgument);
         }
+        return expressions;
+    }
+
+    const target = `(?<![\\w$])${name}`;
+    collect(new RegExp(`${target}\\s*=(?!=)\\s*([^;]*);`, 'g'), prepareExpression);
+    if (isCollection) {
+        collect(new RegExp(`${target}\\s*\\.\\s*(?:${COLLECTION_ADDERS})\\s*\\(([^;]*)\\)\\s*;`, 'g'), text => lastArgument(prepareExpression(text)));
+    }
+    if (cls.language === 'c') {
+        initializerListExpressions(body, fieldName).forEach(text => expressions.push(prepareExpression(text)));
+        collect(new RegExp(`${target}\\s*\\{([^;]*)\\}\\s*;`, 'g'), prepareExpression);
     }
     return expressions;
 }
@@ -141,15 +222,21 @@ function assignedExpressions(body, fieldName, isCollection) {
 function suppliedIdentifier(expression) {
     const wrapped = SUPPLIED_WRAPPER.exec(expression);
     if (wrapped) return wrapped[1];
+    const fallback = /^(\w+)\s*(?:\|\||\?\?)|^(\w+)\s+(?:or|if)\s/.exec(expression);
+    if (fallback) return fallback[1] || fallback[2];
     return /^\w+$/.test(expression) ? expression : null;
 }
 
 function classifyFieldOwnership(cls, field, targetClassName, ownParamNames) {
-    const expressions = assignedExpressions(cls.body || '', field.name, isCollectionType(field.type));
+    if (field.assignedFromParameter) return 'aggregation';
+    const expressions = assignedExpressions(cls, field.name, isCollectionType(field.type));
     if (expressions.some(expression => ownParamNames.has(suppliedIdentifier(expression)))) {
         return 'aggregation';
     }
-    const creates = new RegExp(`\\bnew\\s+${escapeRegExp(targetClassName)}\\b`);
+    const target = escapeRegExp(targetClassName);
+    const creates = cls.language === 'python'
+        ? new RegExp(`\\b${target}\\s*\\(`)
+        : new RegExp(`\\bnew\\s+(?:[\\w:.]+(?:::|\\.))?${target}\\b`);
     if (expressions.some(expression => creates.test(expression))) return 'composition';
     return 'association';
 }
@@ -187,15 +274,17 @@ function splitTopLevel(text, separator) {
     const parts = [];
     let depth = 0;
     let current = '';
+    let previous = '';
     for (const ch of text) {
-        if (ch === '<') depth++;
-        else if (ch === '>') depth--;
+        if (ch === '<' || ch === '(' || ch === '[' || ch === '{') depth++;
+        else if (ch === ')' || ch === ']' || ch === '}' || (ch === '>' && previous !== '=' && previous !== '-')) depth--;
         if (ch === separator && depth === 0) {
             parts.push(current);
             current = '';
         } else {
             current += ch;
         }
+        previous = ch;
     }
     parts.push(current);
     return parts;

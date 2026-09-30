@@ -2,19 +2,25 @@ const BaseLanguageProvider = require('./BaseLanguageProvider');
 
 const FIELD_MODIFIERS = '(?:(?:public|private|protected|static|readonly|declare|override|abstract)\\s+)*';
 
+function escapeRegExp(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function splitTopLevel(text) {
     const parts = [];
     let depth = 0;
     let current = '';
+    let previous = '';
     for (const ch of text) {
-        if (ch === '<' || ch === '(' || ch === '[') depth++;
-        else if (ch === '>' || ch === ')' || ch === ']') depth--;
+        if (ch === '<' || ch === '(' || ch === '[' || ch === '{') depth++;
+        else if (ch === ')' || ch === ']' || ch === '}' || (ch === '>' && previous !== '=')) depth--;
         if (ch === ',' && depth === 0) {
             parts.push(current);
             current = '';
         } else {
             current += ch;
         }
+        previous = ch;
     }
     parts.push(current);
     return parts;
@@ -158,6 +164,80 @@ class JavaScriptLanguageProvider extends BaseLanguageProvider {
             });
         }
         return fields;
+    }
+
+    extractMembers(body, classMatch = null) {
+        const { lists, flattened } = this._scanConstructors(body);
+        const { methods, fields } = super.extractMembers(flattened, classMatch);
+        const parse = list => splitTopLevel(list).map(text => this._parseParam(text)).filter(Boolean);
+        const constructorParams = lists.flatMap(parse);
+        const paramTypes = new Map();
+        [...constructorParams, ...methods.flatMap(m => parse(m.params || ''))].forEach(param => {
+            if (param.type && !paramTypes.has(param.name)) paramTypes.set(param.name, param.type);
+        });
+        const properties = constructorParams
+            .filter(param => param.modifiers.trim())
+            .map(param => ({
+                name: param.name,
+                type: param.type,
+                visibility: this.visibilityOf(param.modifiers, '+'),
+                isStatic: false,
+                assignedFromParameter: true
+            }));
+        const propertyNames = new Set(properties.map(p => p.name));
+        const remaining = fields
+            .filter(f => !propertyNames.has(f.name))
+            .map(f => f.type ? f : { ...f, type: this._inferAssignedType(body, f.name, paramTypes) });
+        return { methods, fields: [...properties, ...remaining], paramLists: lists };
+    }
+
+    _scanConstructors(body) {
+        const lists = [];
+        let flattened = '';
+        let last = 0;
+        const pattern = /(?:^|[\s;{}])constructor\s*\(/g;
+        let match;
+        while ((match = pattern.exec(body)) !== null) {
+            const open = match.index + match[0].length - 1;
+            let depth = 0;
+            let close = -1;
+            for (let i = open; i < body.length; i++) {
+                if (body[i] === '(') depth++;
+                else if (body[i] === ')' && --depth === 0) {
+                    close = i;
+                    break;
+                }
+            }
+            if (close < 0) break;
+            const params = body.slice(open + 1, close);
+            lists.push(params.replace(/\s+/g, ' ').trim());
+            flattened += body.slice(last, open + 1) + params.replace(/\s*\n\s*/g, ' ');
+            last = close;
+            pattern.lastIndex = close;
+        }
+        return { lists, flattened: flattened + body.slice(last) };
+    }
+
+    _parseParam(text) {
+        const cleaned = text.trim().replace(/^(?:@\w+(?:\([^)]*\))?\s*)+/, '');
+        const match = /^((?:(?:public|private|protected|readonly|override)\s+)*)(?:\.\.\.)?(#?[\w$]+)\s*\??\s*(?::\s*([\s\S]+?))?\s*(?:=(?!>)[\s\S]*)?$/.exec(cleaned);
+        if (!match) return null;
+        return { name: match[2], type: (match[3] || '').trim(), modifiers: match[1] || '' };
+    }
+
+    _inferAssignedType(body, name, paramTypes) {
+        const pattern = new RegExp(`this\\.${escapeRegExp(name)}\\s*=(?!=)\\s*([^;\\n]*)`, 'g');
+        let match;
+        while ((match = pattern.exec(body)) !== null) {
+            const expression = match[1].trim();
+            const lead = /^([\w$]+)\s*(?:$|\|\||\?\?)/.exec(expression);
+            const type = (lead && paramTypes.get(lead[1]))
+                || this._inferType(expression)
+                || (/\bnew\s+([\w.$]+)/.exec(expression) || [])[1]
+                || '';
+            if (type) return type;
+        }
+        return '';
     }
 
     matchClassStart(line) {
