@@ -80,6 +80,7 @@ class BaseLanguageProvider extends LanguageProvider {
                         extraParents: classMatch.extraParents || [],
                         interfaces: classMatch.interfaces || [],
                         supertypeArgs: classMatch.supertypeArgs || {},
+                        typeParams: classMatch.typeParams || [],
                         isInterface: classMatch.isInterface || false,
                         isEnum: classMatch.isEnum || false,
                         isAbstract: isAbstract,
@@ -129,6 +130,7 @@ class BaseLanguageProvider extends LanguageProvider {
                     extraParents: classMatch.extraParents || [],
                     interfaces: classMatch.interfaces || [],
                     supertypeArgs: classMatch.supertypeArgs || {},
+                    typeParams: classMatch.typeParams || [],
                     isInterface: classMatch.isInterface || false,
                     isEnum: classMatch.isEnum || false,
                     isAbstract: classMatch.isAbstract || false,
@@ -260,6 +262,31 @@ class BaseLanguageProvider extends LanguageProvider {
 
     matchClassStart(line) {
         return null;
+    }
+
+    parseTypeParameters(text, nameOf = param => (/\w+/.exec(param) || [''])[0]) {
+        const inner = String(text || '').trim().replace(/^[<[]|[>\]]$/g, '');
+        const params = [];
+        let depth = 0;
+        let current = '';
+        let previous = '';
+        for (const ch of inner) {
+            if ('<([{'.includes(ch)) depth++;
+            else if (')]}'.includes(ch) || (ch === '>' && previous !== '=' && previous !== '-')) depth--;
+            if (ch === ',' && depth === 0) {
+                params.push(current);
+                current = '';
+            } else {
+                current += ch;
+            }
+            previous = ch;
+        }
+        params.push(current);
+        return params
+            .map(param => param.replace(/\s+/g, ' ').trim())
+            .filter(Boolean)
+            .map(param => ({ name: nameOf(param), text: param }))
+            .filter(param => param.name);
     }
 
     _braceDelta(line) {

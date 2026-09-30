@@ -6,6 +6,11 @@ function escapeMermaid(text) {
     return String(text).replace(/[{}[\]<>]/g, '_');
 }
 
+function genericSuffix(cls) {
+    const names = (cls.typeParams || []).map(p => escapeMermaid(p.name));
+    return names.length ? `~${names.join(', ')}~` : '';
+}
+
 function inheritedOf(cls) {
     return [cls.parent, ...(cls.extraParents || [])].filter(Boolean);
 }
@@ -150,6 +155,7 @@ class ClassProvider extends MermaidDiagramProvider {
             );
 
             const escapedName = escapeMermaid(c.name);
+            const generic = c.isEnum ? '' : genericSuffix(c);
 
             if (c.isExternal) {
                 lines.push(`    class ${escapedName} {`);
@@ -160,15 +166,15 @@ class ClassProvider extends MermaidDiagramProvider {
                 lines.push('        <<enumeration>>');
                 lines.push('    }');
             } else if (isInterface) {
-                lines.push(`    class ${escapedName} {`);
+                lines.push(`    class ${escapedName}${generic} {`);
                 lines.push('        <<interface>>');
                 lines.push('    }');
             } else if (c.isAbstract) {
-                lines.push(`    class ${escapedName} {`);
+                lines.push(`    class ${escapedName}${generic} {`);
                 lines.push('        <<abstract>>');
                 lines.push('    }');
             } else {
-                lines.push(`    class ${escapedName}`);
+                lines.push(`    class ${escapedName}${generic}`);
             }
 
             const allFields = normalizeMembers(c.fields || c.attributes || c.properties);

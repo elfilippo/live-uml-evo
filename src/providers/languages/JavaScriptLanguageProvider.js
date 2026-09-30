@@ -26,15 +26,15 @@ function splitTopLevel(text) {
     return parts;
 }
 
-function skipTypeParameters(text) {
+function splitTypeParameters(text) {
     const start = text.search(/\S/);
-    if (start < 0 || text[start] !== '<') return text;
+    if (start < 0 || text[start] !== '<') return { params: '', rest: text };
     let depth = 0;
     for (let i = start; i < text.length; i++) {
         if (text[i] === '<') depth++;
-        else if (text[i] === '>' && --depth === 0) return text.slice(i + 1);
+        else if (text[i] === '>' && --depth === 0) return { params: text.slice(start, i + 1), rest: text.slice(i + 1) };
     }
-    return '';
+    return { params: '', rest: '' };
 }
 
 function parseSupertypes(text, supertypeArgs) {
@@ -250,7 +250,8 @@ class JavaScriptLanguageProvider extends BaseLanguageProvider {
         const match = trimmed.match(classPattern);
         if (match) {
             const modifiers = match[1] || '';
-            const clauses = skipTypeParameters(trimmed.slice(match[0].length)).split('{')[0];
+            const { params, rest } = splitTypeParameters(trimmed.slice(match[0].length));
+            const clauses = rest.split('{')[0];
             const supertypeArgs = {};
             const extendsMatch = /\bextends\s+([\s\S]*?)(?=\bimplements\b|$)/.exec(clauses);
             const implementsMatch = /\bimplements\s+([\s\S]*)$/.exec(clauses);
@@ -262,6 +263,7 @@ class JavaScriptLanguageProvider extends BaseLanguageProvider {
                 extraParents: parents.slice(1),
                 interfaces: interfaces,
                 supertypeArgs: supertypeArgs,
+                typeParams: this.parseTypeParameters(params),
                 isInterface: match[2] === 'interface',
                 isEnum: match[2] === 'enum',
                 isAbstract: /\babstract\b/.test(modifiers)

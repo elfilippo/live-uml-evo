@@ -42,6 +42,11 @@ function decorate(member) {
     return prefix;
 }
 
+function genericsOf(cls) {
+    const params = (cls.typeParams || []).map(p => p.text);
+    return params.length ? `<${params.join(', ')}>` : '';
+}
+
 function inheritedOf(cls) {
     return [cls.parent, ...(cls.extraParents || [])].filter(Boolean);
 }
@@ -186,10 +191,11 @@ class PlantUMLClassProvider extends PlantUMLDiagramProvider {
             const tooltip = `Click to open ${c.name} and explore its hierarchy`;
             const link = c.isExternal ? '' : `[[command:extension.openClass?${c.name} {${tooltip}}]]`;
 
+            const generics = c.isEnum ? '' : genericsOf(c);
             if (c.name === targetClassName) {
-                uml.push(`${type} ${c.name} <<active>> ${link} {`);
+                uml.push(`${type} ${c.name}${generics} <<active>> ${link} {`);
             } else {
-                uml.push(`${type} ${c.name} ${link} {`);
+                uml.push(`${type} ${c.name}${generics} ${link} {`);
             }
 
             const allFields = normalizeMembers(c.fields || c.attributes || c.properties);

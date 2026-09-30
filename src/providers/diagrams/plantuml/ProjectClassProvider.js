@@ -71,6 +71,11 @@ function formatParams(params) {
         .join(", ");
 }
 
+function genericsOf(cls) {
+    const params = (cls.typeParams || []).map((p) => p.text);
+    return params.length ? `<${params.join(", ")}>` : "";
+}
+
 function decorate(member) {
     let prefix = "";
     if (member.isStatic) prefix += "{static} ";
@@ -125,7 +130,7 @@ class ProjectClassProvider {
             classes = seededShuffle(classes, options.shuffleSeed);
             relationships = seededShuffle(relationships, options.shuffleSeed + 1);
         }
-        const { showDependencies = true, minConfidence = null } = options;
+        const { showDependencies = true, showExternal = true, minConfidence = null } = options;
         const colors = resolveColors(options);
 
         const uml = [];
@@ -176,6 +181,8 @@ class ProjectClassProvider {
         }
 
         const classByName = new Map(classes.map((c) => [c.name, c]));
+        const externals = showExternal ? (model.externals || []) : [];
+        const externalNames = new Set(externals.map((e) => e.name));
 
         classes.forEach((c) => {
             if (!c.name || !c.name.trim()) return;
@@ -186,7 +193,7 @@ class ProjectClassProvider {
                 : c.isInterface ? "interface"
                 : c.isAbstract ? "abstract class"
                 : "class";
-            uml.push(`${type} ${c.name} [[command:extension.openClass?${c.name}]] {`);
+            uml.push(`${type} ${c.name}${c.isEnum ? "" : genericsOf(c)} [[command:extension.openClass?${c.name}]] {`);
 
             const fields = normalizeMembers(c.fields);
             const methods = normalizeMembers(c.methods);
@@ -200,11 +207,17 @@ class ProjectClassProvider {
             uml.push("}");
         });
 
+        externals.forEach((e) => {
+            if (!e.name || !e.name.trim()) return;
+            uml.push(`${e.isInterface ? "interface" : "class"} ${e.name} <<external>> #line.dashed`);
+        });
+
         const renderedEdges = new Set();
         relationships.forEach((rel) => {
             if (rel.type === "dependency" && !showDependencies) return;
             if (minConfidence === "high" && rel.confidence && rel.confidence !== "high") return;
-            if (!classByName.has(rel.from) || !classByName.has(rel.to)) return;
+            if (!classByName.has(rel.from)) return;
+            if (!classByName.has(rel.to) && !externalNames.has(rel.to)) return;
 
             const arrow = ARROW[rel.type];
             if (!arrow) return;

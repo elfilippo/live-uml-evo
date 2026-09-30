@@ -26,6 +26,11 @@ function formatTypeArgs(args) {
         .replace(/[{}[\]~:]/g, '_');
 }
 
+function genericSuffix(cls) {
+    const names = (cls.typeParams || []).map(p => escapeMermaid(p.name));
+    return names.length ? `~${names.join(', ')}~` : '';
+}
+
 function normalizeMembers(raw) {
     if (!Array.isArray(raw)) return [];
     return raw.map(member => {
@@ -73,7 +78,7 @@ const ARROW = {
 class ProjectClassProvider {
     generate(model, options = {}) {
         const { classes, relationships } = model;
-        const { title = 'Project Diagram', showDependencies = true, minConfidence = null } = options;
+        const { title = 'Project Diagram', showDependencies = true, showExternal = true, minConfidence = null } = options;
 
         const lines = [];
         lines.push('classDiagram');
@@ -85,25 +90,28 @@ class ProjectClassProvider {
         }
 
         const classByName = new Map(classes.map(c => [c.name, c]));
+        const externals = showExternal ? (model.externals || []) : [];
+        const externalNames = new Set(externals.map(e => e.name));
 
         classes.forEach(c => {
             if (!c.name || !c.name.trim()) return;
             const escapedName = escapeMermaid(c.name);
+            const generic = c.isEnum ? '' : genericSuffix(c);
 
             if (c.isEnum) {
                 lines.push(`    class ${escapedName} {`);
                 lines.push('        <<enumeration>>');
                 lines.push('    }');
             } else if (c.isInterface) {
-                lines.push(`    class ${escapedName} {`);
+                lines.push(`    class ${escapedName}${generic} {`);
                 lines.push('        <<interface>>');
                 lines.push('    }');
             } else if (c.isAbstract) {
-                lines.push(`    class ${escapedName} {`);
+                lines.push(`    class ${escapedName}${generic} {`);
                 lines.push('        <<abstract>>');
                 lines.push('    }');
             } else {
-                lines.push(`    class ${escapedName}`);
+                lines.push(`    class ${escapedName}${generic}`);
             }
 
             const fields = normalizeMembers(c.fields);
@@ -120,11 +128,24 @@ class ProjectClassProvider {
             });
         });
 
+        if (externals.length > 0) {
+            lines.push('    classDef external opacity:1,stroke-dasharray:5 5');
+            externals.forEach(e => {
+                if (!e.name || !e.name.trim()) return;
+                const escapedName = escapeMermaid(e.name);
+                lines.push(`    class ${escapedName} {`);
+                lines.push('        <<external>>');
+                lines.push('    }');
+                lines.push(`    class ${escapedName}:::external`);
+            });
+        }
+
         const renderedEdges = new Set();
         relationships.forEach(rel => {
             if (rel.type === 'dependency' && !showDependencies) return;
             if (minConfidence === 'high' && rel.confidence && rel.confidence !== 'high') return;
-            if (!classByName.has(rel.from) || !classByName.has(rel.to)) return;
+            if (!classByName.has(rel.from)) return;
+            if (!classByName.has(rel.to) && !externalNames.has(rel.to)) return;
 
             const arrow = ARROW[rel.type];
             if (!arrow) return;

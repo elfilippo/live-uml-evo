@@ -35,6 +35,10 @@
  *    dropped. The provider strips generic arguments from `parent` and
  *    `interfaces`, so a known class named only inside a generic argument
  *    (`implements Comparable<Car>`) is picked up by the body dependency scan.
+ *  - A supertype that isn't in the analyzed set (`implements Comparable<Car>`,
+ *    `extends Exception`) still gets its inheritance/realization edge, flagged
+ *    `external: true`, and is listed in the result's `externals` so renderers
+ *    can draw it as a stub node.
  *  - A class's or interface's own generic bounds (`class Fleet<T extends
  *    Vehicle & Serializable>`) produce an inheritance-like edge to each bound
  *    type — explicit in source, not a heuristic.
@@ -42,9 +46,9 @@
  *    the attribute list); a field bidirectionally mirrored by another class's
  *    field only keeps its ownership diamond on the stronger (composition >
  *    aggregation) side — the weaker direction is downgraded to a dependency.
- *  - Only classes present in the analyzed set are ever linked; a field or
- *    parameter typed as a JDK/stdlib/external type simply produces no edge,
- *    since there's nothing in the model to draw it to.
+ *  - Apart from external supertypes, only classes present in the analyzed set
+ *    are ever linked; a field or parameter typed as a JDK/stdlib/external type
+ *    simply produces no edge.
  */
 
 function escapeRegExp(text) {
@@ -315,14 +319,16 @@ class RelationshipAnalyzer {
     /**
      * @param {Array} classes - full-parsed classes (name, parent, interfaces,
      *   isInterface, fields, methods, body) from across the analyzed scope.
-     * @returns {{classes: Array, relationships: Array}} relationships:
-     *   {from, to, type, label?, multiplicity?, confidence?}
+     * @returns {{classes: Array, relationships: Array, externals: Array}}
+     *   relationships: {from, to, type, label?, multiplicity?, confidence?, external?}
+     *   externals: {name, isInterface} for supertypes outside the analyzed set
      *   type is one of: inheritance, realization, composition, aggregation, association, dependency
      */
     analyze(classes) {
         const classNames = classes.map(c => c.name);
         const classByName = new Map(classes.map(c => [c.name, c]));
         const relationships = [];
+        const externals = new Map();
         const seen = new Set();
 
         const addEdge = (from, to, type, extra = {}) => {
@@ -335,25 +341,23 @@ class RelationshipAnalyzer {
         for (const cls of classes) {
             const linkedTargets = new Set();
 
-            const parentName = cls.parent ? baseName(cls.parent) : null;
-            if (parentName && classByName.has(parentName)) {
-                addEdge(cls.name, parentName, 'inheritance', typeArgsFor(cls, cls.parent));
-                linkedTargets.add(parentName);
-            }
-            (cls.extraParents || []).forEach(rawParent => {
-                const base = baseName(rawParent);
+            const linkSupertype = (rawName, type, targetIsInterface) => {
+                const base = baseName(rawName);
+                if (!base) return;
                 if (classByName.has(base)) {
-                    addEdge(cls.name, base, 'inheritance', typeArgsFor(cls, rawParent));
+                    addEdge(cls.name, base, type, typeArgsFor(cls, rawName));
                     linkedTargets.add(base);
+                    return;
                 }
-            });
-            (cls.interfaces || []).forEach(rawIface => {
-                const base = baseName(rawIface);
-                if (classByName.has(base)) {
-                    addEdge(cls.name, base, 'realization', typeArgsFor(cls, rawIface));
-                    linkedTargets.add(base);
-                }
-            });
+                const known = externals.get(base);
+                if (known) known.isInterface = known.isInterface || targetIsInterface;
+                else externals.set(base, { name: base, isInterface: targetIsInterface });
+                addEdge(cls.name, base, type, { ...typeArgsFor(cls, rawName), external: true });
+            };
+
+            if (cls.parent) linkSupertype(cls.parent, 'inheritance', !!cls.isInterface);
+            (cls.extraParents || []).forEach(rawParent => linkSupertype(rawParent, 'inheritance', !!cls.isInterface));
+            (cls.interfaces || []).forEach(rawIface => linkSupertype(rawIface, 'realization', true));
 
             extractGenericBoundTargets(cls, classNames).forEach(target => {
                 addEdge(cls.name, target, 'inheritance', { confidence: 'medium' });
@@ -423,7 +427,7 @@ class RelationshipAnalyzer {
             delete loser.multiplicity;
         }
 
-        return { classes, relationships };
+        return { classes, relationships, externals: Array.from(externals.values()) };
     }
 }
 

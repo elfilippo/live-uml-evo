@@ -1,17 +1,17 @@
 const vscode = require("vscode");
-const core = require("./core.js");
-const registry = require("./registry");
+const core = require("./Core.js");
+const registry = require("./TRegistry.js");
 const { spawn } = require("child_process");
-const { getWebviewHtml } = require("./webview");
+const { getWebviewHtml } = require("./TWebview.js");
 const crypto = require("crypto");
 const path = require("path");
-const tsProvider = require("./providers/utils/TreeSitterProvider");
-const Visualizer = require("./visualizer");
-const logger = require("./logger");
-const RelationshipAnalyzer = require("./providers/analysis/RelationshipAnalyzer");
-const MermaidProjectClassProvider = require("./providers/diagrams/mermaid/ProjectClassProvider");
-const PlantUMLProjectClassProvider = require("./providers/diagrams/plantuml/ProjectClassProvider");
-const { getProjectWebviewHtml } = require("./projectWebview");
+const tsProvider = require("./providers/utils/TreeSitterProvider.js");
+const Visualizer = require("./TVisualizer.js");
+const logger = require("./TLogger.js");
+const RelationshipAnalyzer = require("./providers/analysis/TRelationshipAnalyzer.js");
+const MermaidProjectClassProvider = require("./providers/diagrams/mermaid/ProjectClassProvider.js");
+const PlantUMLProjectClassProvider = require("./providers/diagrams/plantuml/ProjectClassProvider.js");
+const { getProjectWebviewHtml } = require("./TProjectWebview.js");
 
 let sidebarProvider = null;
 let currentLanguage = "";
@@ -375,6 +375,7 @@ function activate(context) {
             this.languageId = null;
             this.diagramMode = "plantuml";
             this.showDependencies = true;
+            this.showExternal = true;
             this.theme = "ocean";
             this.customColors = null;
 
@@ -637,6 +638,10 @@ function activate(context) {
                             this.showDependencies = msg.value;
                             await this.regenerate();
                             break;
+                        case "toggleExternal":
+                            this.showExternal = msg.value;
+                            await this.regenerate();
+                            break;
                         case "changeDiagramMode":
                             await this.handleChangeDiagramMode(msg.diagramMode);
                             break;
@@ -689,6 +694,7 @@ function activate(context) {
                 const isMermaid = this.diagramMode !== "plantuml";
                 const options = {
                     showDependencies: this.showDependencies !== false,
+                    showExternal: this.showExternal !== false,
                     theme: this.theme,
                     customColors: this.customColors
                 };

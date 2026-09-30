@@ -271,6 +271,7 @@ class JavaLanguageProvider extends BaseLanguageProvider {
                 extraParents: extended.slice(1),
                 interfaces: interfaces,
                 supertypeArgs: supertypeArgs,
+                typeParams: this.parseTypeParameters(args[match[3]]),
                 isInterface: match[2] === 'interface',
                 isEnum: match[2] === 'enum',
                 isAbstract: /\babstract\b/.test(modifiers)

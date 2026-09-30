@@ -105,6 +105,7 @@ function getProjectWebviewHtml(extensionVersion, sidebarLocation) {
             .sw-association::after { content: '\\25B8'; position: absolute; right: -4px; top: -7px; color: #7f8c8d; font-size: 11px; }
             .sw-association { background: #7f8c8d; }
             .sw-dependency { background: repeating-linear-gradient(90deg, #8e44ad 0 4px, transparent 4px 7px); }
+            .sw-external { height: 10px; box-sizing: border-box; background: none; border: 1px dashed #2980b9; }
             .legend-note { font-style: italic; }
             .diagram-wrapper { flex: 1; position: relative; min-height: 0; }
             .diagram-container {
@@ -175,6 +176,7 @@ function getProjectWebviewHtml(extensionVersion, sidebarLocation) {
                         <button class="action" onclick="applyTheme()" title="Apply these colors">\u2713 Apply</button>
                     </span>
                     <label><input type="checkbox" id="depToggle" checked /> Show dependencies</label>
+                    <label><input type="checkbox" id="extToggle" checked /> Show external supertypes</label>
                     <button class="action" onclick="refresh()">\u21bb Refresh</button>
                     <button class="action" onclick="exportDiagram('svg')" title="Download the current diagram as an SVG file">\u2b07 SVG</button>
                     <button class="action" onclick="exportDiagram('png')" title="Download the current diagram as a PNG file">\u2b07 PNG</button>
@@ -187,6 +189,7 @@ function getProjectWebviewHtml(extensionVersion, sidebarLocation) {
                 <div class="legend-item"><span class="legend-swatch sw-aggregation"></span> Aggregation (has-a)</div>
                 <div class="legend-item"><span class="legend-swatch sw-association"></span> Association (references)</div>
                 <div class="legend-item"><span class="legend-swatch sw-dependency"></span> Dependency (uses)</div>
+                <div class="legend-item"><span class="legend-swatch sw-external"></span> External supertype (not in project)</div>
                 <div class="legend-item legend-note">&deg; = final field</div>
                 <button class="header-collapse-toggle" id="headerCollapseToggle" onclick="toggleHeader()" title="Collapse to just the title and overview">\u25b2</button>
             </div>
@@ -336,6 +339,10 @@ function getProjectWebviewHtml(extensionVersion, sidebarLocation) {
 
                 document.getElementById('depToggle').addEventListener('change', (e) => {
                     vscode.postMessage({ type: 'toggleDependencies', value: e.target.checked });
+                });
+
+                document.getElementById('extToggle').addEventListener('change', (e) => {
+                    vscode.postMessage({ type: 'toggleExternal', value: e.target.checked });
                 });
 
                 window.addEventListener('message', (event) => {

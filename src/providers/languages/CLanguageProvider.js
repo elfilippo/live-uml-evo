@@ -18,6 +18,11 @@ function splitBases(text) {
     return parts;
 }
 
+function templateParameterName(param) {
+    const name = (/(\w+)\s*$/.exec(param.replace(/=[\s\S]*$/, '')) || [])[1];
+    return name === 'typename' || name === 'class' ? '' : name || '';
+}
+
 const C_KEYWORDS = new Set([
     'return', 'if', 'else', 'while', 'for', 'switch', 'case', 'break', 'continue',
     'goto', 'typedef', 'using', 'namespace', 'template', 'friend', 'delete', 'new',
@@ -221,8 +226,25 @@ class CLanguageProvider extends BaseLanguageProvider {
     }
 
     matchClassStart(line) {
-        const trimmed = line.trim();
+        let trimmed = line.trim();
         if (trimmed.split('{')[0].includes(';')) return null;
+        let typeParams = [];
+        const template = /^template\s*</.exec(trimmed);
+        if (template) {
+            const open = template[0].length - 1;
+            let depth = 0;
+            let close = -1;
+            for (let i = open; i < trimmed.length; i++) {
+                if (trimmed[i] === '<') depth++;
+                else if (trimmed[i] === '>' && --depth === 0) {
+                    close = i;
+                    break;
+                }
+            }
+            if (close < 0) return null;
+            typeParams = this.parseTypeParameters(trimmed.slice(open, close + 1), templateParameterName);
+            trimmed = trimmed.slice(close + 1).trim();
+        }
         // matches: class MyClass : public Parent1, public Parent2 {
         // Also handles template bases (Base<int>) and namespace-qualified (NS::Base)
         const classPattern = /^\s*(?:class|struct)\s+(\w+)(?:\s+final)?(?:\s*:\s*([^{]+))?\s*\{?/;
@@ -242,19 +264,34 @@ class CLanguageProvider extends BaseLanguageProvider {
                 parent: bases[0] || null,
                 extraParents: bases.slice(1),
                 interfaces: [],
-                supertypeArgs
+                supertypeArgs,
+                typeParams
             };
         }
         return null;
     }
 
+    attachTemplateHeaders(code) {
+        const lines = code.split('\n');
+        for (let i = 0; i < lines.length - 1; i++) {
+            if (!/^\s*template\s*<[^;{}]*>\s*$/.test(lines[i])) continue;
+            let j = i + 1;
+            while (j < lines.length && !lines[j].trim()) j++;
+            if (j < lines.length && /^\s*(?:class|struct)\s/.test(lines[j])) {
+                lines[j] = `${lines[i].trim()} ${lines[j].trim()}`;
+                lines[i] = '';
+            }
+        }
+        return lines.join('\n');
+    }
+
     parseClasses(sourceCode) {
-        const processedCode = this.processPreprocessor(sourceCode);
+        const processedCode = this.attachTemplateHeaders(this.processPreprocessor(sourceCode));
         return super.parseClasses(processedCode);
     }
 
     parseClassesLight(sourceCode) {
-        const processedCode = this.processPreprocessor(sourceCode);
+        const processedCode = this.attachTemplateHeaders(this.processPreprocessor(sourceCode));
         return super.parseClassesLight(processedCode);
     }
 }

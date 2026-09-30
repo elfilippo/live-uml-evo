@@ -1,9 +1,9 @@
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
-const core = require('./core');
-const registry = require('./registry');
-const logger = require('./logger');
+const core = require('./Core');
+const registry = require('./TRegistry');
+const logger = require('./TLogger');
 
 class Visualizer {
     constructor(mode) {

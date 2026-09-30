@@ -107,6 +107,7 @@ class PythonLanguageProvider extends BaseLanguageProvider {
                         parent: classMatch.parent || null,
                         extraParents: classMatch.extraParents || [],
                         interfaces: [],
+                        typeParams: classMatch.typeParams || [],
                         isInterface: classMatch.isInterface || false,
                         isEnum: classMatch.isEnum || false,
                         isAbstract: isAbstract,
@@ -130,10 +131,17 @@ class PythonLanguageProvider extends BaseLanguageProvider {
     matchClassStart(line) {
         const trimmed = line.trim();
         // matches: class MyClass(Parent1, pkg.Parent2, Generic[T], metaclass=Meta):
-        const classPattern = /^\s*class\s+(\w+)(?:\s*\[[^\]]*\])?\s*(?:\((.*)\))?\s*:(?:\s*#.*)?$/;
+        const classPattern = /^\s*class\s+(\w+)(?:\s*\[([^\]]*)\])?\s*(?:\((.*)\))?\s*:(?:\s*#.*)?$/;
         const match = trimmed.match(classPattern);
         if (match) {
-            const parents = match[2] ? splitTopLevel(match[2])
+            const genericBase = match[3] ? splitTopLevel(match[3])
+                .map(s => /^\s*(?:\w+\.)*(?:Generic|Protocol)\[([\s\S]*)\]\s*$/.exec(s))
+                .find(Boolean) : null;
+            const typeParams = this.parseTypeParameters(
+                match[2] || (genericBase ? genericBase[1] : ''),
+                param => (/^\**(\w+)/.exec(param) || [])[1]
+            );
+            const parents = match[3] ? splitTopLevel(match[3])
                 .map(s => s.trim())
                 .filter(s => s && !/^\*/.test(s) && !/^\w+\s*=(?!=)/.test(s))
                 .map(s => s.replace(/\[[\s\S]*$/, '').trim())
@@ -142,6 +150,7 @@ class PythonLanguageProvider extends BaseLanguageProvider {
                 name: match[1],
                 parent: parents[0] || null,
                 extraParents: parents.slice(1),
+                typeParams,
                 isEnum: parents.some(p => ENUM_BASES.has(p.split('.').pop()))
             };
         }
