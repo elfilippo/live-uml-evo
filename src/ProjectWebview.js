@@ -300,16 +300,16 @@ function getProjectWebviewHtml(extensionVersion, sidebarLocation) {
                         // needs no round trip to re-scan the project.
                         mermaid.initialize(mermaidConfigFor(colors));
                         if (state.mermaidCode) renderMermaid(state.mermaidCode, colors);
-                    } else {
-                        // PlantUML's colors are skinparam directives baked into the
-                        // generated diagram source, so this does need the backend to
-                        // regenerate it.
-                        vscode.postMessage({
-                            type: 'changeTheme',
-                            theme: theme === 'custom' ? null : theme,
-                            customColors: theme === 'custom' ? colors : null
-                        });
                     }
+                    // The backend always hears about the change: PlantUML bakes its
+                    // colors into the generated source (so it must regenerate), and
+                    // any hand-edited code has its matching color properties rewritten.
+                    vscode.postMessage({
+                        type: 'changeTheme',
+                        theme: theme === 'custom' ? null : theme,
+                        customColors: theme === 'custom' ? colors : null,
+                        colors: colors
+                    });
                 }
 
                 document.getElementById('themeSelect').addEventListener('change', applyTheme);
@@ -351,6 +351,23 @@ function getProjectWebviewHtml(extensionVersion, sidebarLocation) {
                         case 'loading':
                             document.getElementById('diagramContainer').innerHTML = '<div class="loading-state"><div class="spinner"></div>Analyzing project\\u2026</div>';
                             break;
+                        case 'themeFromCode': {
+                            const current = currentColors();
+                            const roles = ['background', 'canvas', 'accent', 'text'];
+                            const differs = roles.some(function (r) {
+                                return msg.colors[r] && String(msg.colors[r]).toLowerCase() !== String(current[r] || '').toLowerCase();
+                            });
+                            if (!differs) break;
+                            const merged = Object.assign({}, current, msg.colors);
+                            document.getElementById('themeSelect').value = 'custom';
+                            document.getElementById('customColors').style.display = 'flex';
+                            document.getElementById('colorBg').value = merged.background;
+                            document.getElementById('colorCanvas').value = merged.canvas || merged.background;
+                            document.getElementById('colorAccent').value = merged.accent;
+                            document.getElementById('colorText').value = merged.text;
+                            vscode.postMessage({ type: 'themeState', theme: null, customColors: merged });
+                            break;
+                        }
                         case 'error':
                             document.getElementById('diagramContainer').innerHTML = '<div class="error-state">\\u26A0\\uFE0F ' + escapeHtml(msg.message) + '</div>';
                             document.getElementById('stats').textContent = '';

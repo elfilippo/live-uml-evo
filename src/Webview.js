@@ -1163,9 +1163,27 @@ function getWebviewHtml(extensionVersion) {
                                 state.projectMirrorCode = msg.code || '';
                             }
                             render();
+                            reportProjectDraft();
                             vscode.setState(state);
                             break;
                         }
+                        case 'projectEditsDiscarded':
+                            state.projectIsCustom = false;
+                            state.projectDraftCode = '';
+                            state.projectLastAppliedCode = '';
+                            state.projectMirrorCode = '';
+                            updateProjectEditor();
+                            reportProjectDraft();
+                            vscode.setState(state);
+                            break;
+                        case 'projectEditorReplace':
+                            if (!state.projectEditMode) break;
+                            if (state.projectIsCustom && typeof msg.baseline === 'string') state.projectLastAppliedCode = msg.baseline;
+                            if (typeof msg.draft === 'string') state.projectDraftCode = msg.draft;
+                            updateProjectEditor();
+                            reportProjectDraft();
+                            vscode.setState(state);
+                            break;
                         case 'projectDiagramSync': {
                             // A one-way mirror of the panel's live, auto-generated
                             // diagram — only applied while the editor is genuinely idle
@@ -1196,6 +1214,7 @@ function getWebviewHtml(extensionVersion) {
                             state.projectDiagramMode = msg.diagramMode || state.projectDiagramMode;
                             state.projectDraftCode = msg.code || '';
                             render();
+                            reportProjectDraft();
                             vscode.setState(state);
                             break;
                         case 'noEditor':
@@ -1441,6 +1460,21 @@ function projectBaselineCode() {
     return state.projectIsCustom ? state.projectLastAppliedCode : state.projectMirrorCode;
 }
 
+var lastReportedProjectDraft = null;
+
+function reportProjectDraft() {
+    const dirty = state.projectDraftCode !== projectBaselineCode();
+    const key = dirty ? state.projectDiagramMode + ':' + state.projectDraftCode : '';
+    if (key === lastReportedProjectDraft) return;
+    lastReportedProjectDraft = key;
+    vscode.postMessage({
+        type: 'projectDraftChanged',
+        dirty: dirty,
+        code: dirty ? state.projectDraftCode : '',
+        diagramMode: state.projectDiagramMode
+    });
+}
+
 function renderProjectEditor() {
     const hasUnsavedDraft = state.projectDraftCode !== projectBaselineCode();
     const modeLabel = state.projectDiagramMode === 'mermaid' ? 'Mermaid' : 'PlantUML';
@@ -1597,6 +1631,7 @@ function refreshProjectEditorToolbar() {
                 ? 'Showing your custom code'
                 : 'Mirroring the live diagram';
     }
+    reportProjectDraft();
 }
 
 function attachProjectEditorEvents() {
@@ -1647,6 +1682,7 @@ function resetProjectDiagram() {
     state.projectDraftCode = '';
     state.projectLastAppliedCode = '';
     state.projectMirrorCode = '';
+    reportProjectDraft();
     vscode.setState(state);
     vscode.postMessage({ type: 'resetProjectDiagram' });
 }
@@ -1666,6 +1702,7 @@ function changeProjectScope(value) {
     state.projectLastAppliedCode = '';
     state.projectMirrorCode = '';
     render();
+    reportProjectDraft();
     vscode.setState(state);
     vscode.postMessage({ type: 'changeProjectScope', scopeFolder: scopeFolder });
 }

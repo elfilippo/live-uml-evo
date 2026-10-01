@@ -12,6 +12,7 @@ const RelationshipAnalyzer = require("./providers/analysis/RelationshipAnalyzer.
 const MermaidProjectClassProvider = require("./providers/diagrams/mermaid/ProjectClassProvider.js");
 const PlantUMLProjectClassProvider = require("./providers/diagrams/plantuml/ProjectClassProvider.js");
 const { getProjectWebviewHtml } = require("./ProjectWebview.js");
+const ThemeSync = require("./ThemeSync.js");
 
 let sidebarProvider = null;
 let currentLanguage = "";
@@ -395,6 +396,7 @@ function activate(context) {
             // load. Kept in sync at the end of every successful render.
             this.lastDiagramText = "";
             this.lastDiagramMode = "plantuml";
+            this._themeSnapshot = null;
         }
 
         currentScopeLabel() {
@@ -445,6 +447,7 @@ function activate(context) {
         // source-driven regenerate() so the sidebar mirrors live edits without
         // ever clobbering something the person is mid-editing.
         _syncSidebarIfIdle() {
+            this._themeSnapshot = ThemeSync.read(this.lastDiagramText, this.lastDiagramMode).snapshot;
             if (!sidebarProvider) return;
             sidebarProvider.post({
                 type: "projectDiagramSync",
@@ -464,7 +467,29 @@ function activate(context) {
             // shouldn't be able to make renderCustomCode() reinterpret PlantUML
             // text as Mermaid or vice versa.
             this.customCodeMode = diagramMode === "mermaid" ? "mermaid" : "plantuml";
+            this._syncPickerFromCode();
             await this.renderCustomCode();
+        }
+
+        _syncPickerFromCode() {
+            const result = ThemeSync.read(this.customCode, this.customCodeMode, this._themeSnapshot);
+            this._themeSnapshot = result.snapshot;
+            if (this.panel && Object.keys(result.colors).length > 0) {
+                this.panel.webview.postMessage({ type: "themeFromCode", colors: result.colors });
+            }
+        }
+
+        _recolorEdits(colors) {
+            const draft = sidebarProvider ? sidebarProvider.getProjectDraft() : null;
+            const replace = {};
+            if (this.customCodeActive) {
+                this.customCode = ThemeSync.apply(this.customCode, this.customCodeMode, colors);
+                this._themeSnapshot = ThemeSync.read(this.customCode, this.customCodeMode).snapshot;
+                replace.baseline = this.customCode;
+                if (!draft) replace.draft = this.customCode;
+            }
+            if (draft) replace.draft = ThemeSync.apply(draft.code, draft.mode, colors);
+            return replace;
         }
 
         // Drops the override and goes back to live, source-driven generation.
@@ -512,34 +537,38 @@ function activate(context) {
             }
         }
 
-        // Handles the panel's own PlantUML/Mermaid tab click. A plain mode
-        // switch just re-regenerates — but if a custom-code override is
-        // currently applied, switching modes would silently discard it (the
-        // override is tied to whichever mode it was written in). Rather than
-        // block the switch outright, ask what to do with the unsaved edits.
+        // Handles the panel's own PlantUML/Mermaid tab click. Switching modes
+        // would silently drop hand-edited code (an applied override, or an
+        // unapplied draft in the sidebar editor), since it's tied to the mode
+        // it was written in — so ask first, and once confirmed, clear the
+        // sidebar editor so it mirrors the new mode's generated code.
         async handleChangeDiagramMode(diagramMode) {
-            if (this.customCodeActive && diagramMode !== this.customCodeMode) {
-                const currentLabel = this.customCodeMode === "mermaid" ? "Mermaid" : "PlantUML";
+            const draft = sidebarProvider ? sidebarProvider.getProjectDraft() : null;
+            const customConflicts = this.customCodeActive && diagramMode !== this.customCodeMode;
+            const draftConflicts = !!draft && diagramMode !== draft.mode;
+
+            if (customConflicts || draftConflicts) {
+                const edited = draftConflicts ? { code: draft.code, mode: draft.mode } : { code: this.customCode, mode: this.customCodeMode };
+                const currentLabel = edited.mode === "mermaid" ? "Mermaid" : "PlantUML";
                 const targetLabel = diagramMode === "mermaid" ? "Mermaid" : "PlantUML";
                 const choice = await vscode.window.showWarningMessage(
-                    `You have custom ${currentLabel} code applied to this diagram. Switching to ${targetLabel} will discard it.`,
+                    `You have edited ${currentLabel} code that isn't part of the generated diagram. Switching to ${targetLabel} will discard it.`,
                     { modal: true },
                     "Save & Switch",
                     "Discard & Switch"
                 );
 
                 if (!choice) {
-                    // Cancelled — the panel already flipped to a loading spinner
-                    // when the tab was clicked, so restore what it was actually
-                    // showing instead of leaving it stuck there.
-                    await this.renderCustomCode();
+                    if (this.customCodeActive) await this.renderCustomCode();
+                    else await this.regenerate();
                     return;
                 }
 
                 if (choice === "Save & Switch") {
-                    const saved = await this.saveCustomCodeToDisk();
+                    const saved = await this.saveCodeToDisk(edited.code, edited.mode);
                     if (!saved) {
-                        await this.renderCustomCode();
+                        if (this.customCodeActive) await this.renderCustomCode();
+                        else await this.regenerate();
                         return;
                     }
                 }
@@ -547,31 +576,30 @@ function activate(context) {
                 this.customCodeActive = false;
                 this.customCode = null;
                 this.customCodeMode = null;
+                if (sidebarProvider) sidebarProvider.post({ type: "projectEditsDiscarded" });
             }
 
             this.diagramMode = diagramMode;
             await this.regenerate();
         }
 
-        // Writes this.customCode out to a file the person picks, reusing the
-        // same save-dialog flow as the sidebar editor's "Save…" button.
-        async saveCustomCodeToDisk() {
-            const ext = this.customCodeMode === "mermaid" ? "mmd" : "puml";
+        async saveCodeToDisk(code, mode) {
+            const ext = mode === "mermaid" ? "mmd" : "puml";
             const defaultUri =
                 vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
                     ? vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, `project.${ext}`)
                     : undefined;
             const target = await vscode.window.showSaveDialog({
                 defaultUri,
-                filters: this.customCodeMode === "mermaid" ? { Mermaid: ["mmd"] } : { PlantUML: ["puml", "iuml"] }
+                filters: mode === "mermaid" ? { Mermaid: ["mmd"] } : { PlantUML: ["puml", "iuml"] }
             });
             if (!target) return false;
             try {
-                await vscode.workspace.fs.writeFile(target, Buffer.from(this.customCode || "", "utf8"));
+                await vscode.workspace.fs.writeFile(target, Buffer.from(code || "", "utf8"));
                 vscode.window.showInformationMessage(`Saved diagram source to ${target.fsPath}`);
                 return true;
             } catch (e) {
-                logger.error(`saveCustomCodeToDisk: ${e.message}`, e.stack);
+                logger.error(`saveCodeToDisk: ${e.message}`, e.stack);
                 vscode.window.showErrorMessage(`Couldn't save diagram source: ${e.message}`);
                 return false;
             }
@@ -649,15 +677,20 @@ function activate(context) {
                         case "changeDiagramMode":
                             await this.handleChangeDiagramMode(msg.diagramMode);
                             break;
-                        case "changeTheme":
-                            // Mermaid theming is applied entirely client-side (mermaid's
-                            // own theme/themeVariables config, re-rendering the cached
-                            // diagram text instantly) — this only matters, and only
-                            // triggers a real regenerate, for PlantUML, since its colors
-                            // are baked into the generated diagram source itself.
+                        case "changeTheme": {
                             this.theme = msg.theme;
                             this.customColors = msg.customColors || null;
-                            if (this.diagramMode === "plantuml") await this.regenerate();
+                            const replace = msg.colors ? this._recolorEdits(msg.colors) : {};
+                            if (this.customCodeActive) await this.renderCustomCode();
+                            else if (this.diagramMode === "plantuml") await this.regenerate();
+                            if (sidebarProvider && (replace.baseline !== undefined || replace.draft !== undefined)) {
+                                sidebarProvider.post({ type: "projectEditorReplace", ...replace });
+                            }
+                            break;
+                        }
+                        case "themeState":
+                            this.theme = msg.theme;
+                            this.customColors = msg.customColors || null;
                             break;
                         case "command":
                             vscode.commands.executeCommand(msg.command, msg.args);
@@ -977,6 +1010,11 @@ class LiveUmlSidebar {
         // acting as the code editor for. Only one at a time — the sidebar is a
         // single shared view. null when no project panel is focused.
         this._projectEditPanel = null;
+        this._projectDraft = null;
+    }
+
+    getProjectDraft() {
+        return this._projectDraft;
     }
 
     isViewVisible() {
@@ -1076,6 +1114,9 @@ class LiveUmlSidebar {
                     break;
                 case "showInfo":
                     vscode.window.showInformationMessage(msg.message);
+                    break;
+                case "projectDraftChanged":
+                    this._projectDraft = msg.dirty ? { code: msg.code, mode: msg.diagramMode === "mermaid" ? "mermaid" : "plantuml" } : null;
                     break;
                 case "applyProjectDiagram":
                     if (this._projectEditPanel) {
