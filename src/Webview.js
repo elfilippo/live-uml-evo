@@ -1382,7 +1382,7 @@ function getWebviewHtml(extensionVersion) {
                             <h2>Language not supported</h2>
                             <p>Live Uml Evo can't analyze <strong>\${escapeHtml(state.unsupportedLanguage)}</strong> files.</p>
                             <p style="margin-top: 20px; font-size: 11px; color: var(--text-muted);">
-                                Supports: JavaScript, TypeScript, Python, Java, C, C++
+                                Supports: JavaScript, TypeScript, Python, Java, C, C++, Rust
                             </p>
                         </div>
                     \`;
