@@ -27,6 +27,12 @@
  *    owner creates the part.
  *  - Association (plain arrow): the field references the target and the
  *    class body settles neither of the above; nothing more is claimed.
+ *  - Rust has no assignment-based rule: ownership is read from the field's
+ *    type. A plain, `Box`, `Vec`, `Option`, `HashMap` etc. path to the target
+ *    is composition; a reference (`&T`, `*const T`) or shared ownership
+ *    (`Rc`, `Arc`) is aggregation; `Weak`, `PhantomData`, `Cow` and
+ *    function-typed positions are association. When the target appears more
+ *    than once in a type, the strongest relation wins.
  *  - Dependency (dashed arrow): a class named anywhere in a method's
  *    parameters, return type, or body (a static call, a local variable, a
  *    cast, etc.), when that pair isn't already linked by inheritance,
@@ -55,8 +61,9 @@ function escapeRegExp(text) {
     return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function isCollectionType(rawType) {
+function isCollectionType(rawType, language) {
     if (!rawType) return false;
+    if (language === 'rust' && /\b(?:Vec|VecDeque|BTreeSet|BTreeMap|BinaryHeap)\b/.test(rawType)) return true;
     return /\b(List|ArrayList|LinkedList|Set|HashSet|TreeSet|LinkedHashSet|Collection|Map|HashMap|TreeMap|LinkedHashMap|Vector|Queue|Deque|ArrayDeque|Stack|vector|array|Array)\b/.test(rawType)
         || /\[[^\]]*\]/.test(rawType);
 }
@@ -231,7 +238,44 @@ function suppliedIdentifier(expression) {
     return /^\w+$/.test(expression) ? expression : null;
 }
 
+const RUST_SHARED_WRAPPERS = new Set(['Rc', 'Arc']);
+const RUST_LOOSE_WRAPPERS = new Set(['Weak', 'PhantomData', 'Cow', 'fn', 'Fn', 'FnMut', 'FnOnce']);
+const RUST_RELATION_RANK = { association: 0, aggregation: 1, composition: 2 };
+
+function rustOccurrenceRelation(rawType, index) {
+    const stack = [];
+    let borrowed = false;
+    for (let i = 0; i < index; i++) {
+        const ch = rawType[i];
+        if (ch === '&' || ch === '*') {
+            borrowed = true;
+        } else if (ch === ',' || ch === ';') {
+            borrowed = false;
+        } else if (ch === '<' || ch === '(' || ch === '[') {
+            stack.push({ name: (/(\w+)\s*$/.exec(rawType.slice(0, i)) || [])[1] || '', borrowed });
+            borrowed = false;
+        } else if (ch === ')' || ch === ']' || (ch === '>' && rawType[i - 1] !== '-')) {
+            if (stack.length > 0) borrowed = stack.pop().borrowed;
+        }
+    }
+    if (stack.some(entry => RUST_LOOSE_WRAPPERS.has(entry.name))) return 'association';
+    if (borrowed || stack.some(entry => entry.borrowed || RUST_SHARED_WRAPPERS.has(entry.name))) return 'aggregation';
+    return 'composition';
+}
+
+function classifyRustOwnership(rawType, targetClassName) {
+    const pattern = new RegExp(`\\b${escapeRegExp(targetClassName)}\\b`, 'g');
+    let strongest = 'association';
+    let match;
+    while ((match = pattern.exec(rawType)) !== null) {
+        const relation = rustOccurrenceRelation(rawType, match.index);
+        if (RUST_RELATION_RANK[relation] > RUST_RELATION_RANK[strongest]) strongest = relation;
+    }
+    return strongest;
+}
+
 function classifyFieldOwnership(cls, field, targetClassName, ownParamNames) {
+    if (cls.language === 'rust') return classifyRustOwnership(field.type, targetClassName);
     if (field.assignedFromParameter) return 'aggregation';
     const expressions = assignedExpressions(cls, field.name, isCollectionType(field.type));
     if (expressions.some(expression => ownParamNames.has(suppliedIdentifier(expression)))) {
@@ -300,7 +344,22 @@ function splitTopLevel(text, separator) {
 // treated like inheritance. Only the bound's own name counts here; a class
 // named inside a bound's generic argument (`T extends Comparable<Vehicle>`)
 // is left to the body dependency scan.
+function extractRustBoundTargets(cls, classNames) {
+    const bounds = new Set();
+    (cls.typeParams || []).forEach(param => {
+        const colon = (param.text || '').indexOf(':');
+        if (colon < 0) return;
+        const declared = splitTopLevel(param.text.slice(colon + 1), '=')[0];
+        splitTopLevel(declared, '+').forEach(part => {
+            const base = part.replace(/<[\s\S]*$/, '').replace(/^[\s?]+/, '').trim().split('::').pop();
+            if (base && base !== cls.name && classNames.includes(base)) bounds.add(base);
+        });
+    });
+    return Array.from(bounds);
+}
+
 function extractGenericBoundTargets(cls, classNames) {
+    if (cls.language === 'rust') return extractRustBoundTargets(cls, classNames);
     const typeParams = readTypeParameters(cls.body || '', cls.name);
     if (!typeParams) return [];
     const bounds = new Set();
@@ -369,7 +428,7 @@ class RelationshipAnalyzer {
             (cls.fields || []).forEach(field => {
                 const targets = findReferencedClasses(field.type, classNames);
                 targets.forEach(target => {
-                    if (target === cls.name && !isCollectionType(field.type)) {
+                    if (target === cls.name && cls.language !== 'rust' && !isCollectionType(field.type)) {
                         // A field typed exactly as its own owning class with no
                         // collection wrapper would be infinitely-sized — almost
                         // certainly a same-named-but-unrelated type, not a real
@@ -388,7 +447,7 @@ class RelationshipAnalyzer {
                     const relation = classifyFieldOwnership(cls, field, target, ownParamNames);
                     addEdge(cls.name, target, relation, {
                         label: field.name,
-                        multiplicity: isCollectionType(field.type) ? '*' : '1'
+                        multiplicity: isCollectionType(field.type, cls.language) ? '*' : '1'
                     });
                     linkedTargets.add(target);
                 });

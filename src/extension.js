@@ -26,7 +26,8 @@ const SUPPORTED_LANGUAGE_IDS = new Set([
     "typescript",
     "typescriptreact",
     "cpp",
-    "c"
+    "c",
+    "rust"
 ]);
 
 function isSupportedLanguage(languageId) {
@@ -156,6 +157,7 @@ function activate(context) {
                             : activeExt === ".py" ? "python"
                             : activeExt === ".ts" ? "typescript"
                             : activeExt === ".cpp" || activeExt === ".cc" || activeExt === ".cxx" ? "cpp"
+                            : activeExt === ".rs" ? "rust"
                             : "javascript";
                         const provider = registry.getLanguageProvider(languageId);
 
@@ -343,7 +345,7 @@ function activate(context) {
                 try {
                     const bytes = await vscode.workspace.fs.readFile(file);
                     const content = Buffer.from(bytes).toString("utf8");
-                    const parsed = provider.parseClasses(content);
+                    const parsed = provider.parseClasses(content).concat(provider.parseImplFragments?.(content) ?? []);
                     parsed.forEach((c) => (c.fileUri = file));
                     return parsed;
                 } catch (e) {
@@ -352,7 +354,8 @@ function activate(context) {
             })
         );
 
-        return { classes: [].concat(...results) };
+        const classes = [].concat(...results);
+        return { classes: provider.finalizeClasses?.(classes) ?? classes };
     }
 
     function languageIdForExt(ext) {
@@ -362,6 +365,7 @@ function activate(context) {
             : ext === ".ts" ? "typescript"
             : ext === ".cpp" || ext === ".cc" || ext === ".cxx" ? "cpp"
             : ext === ".c" ? "c"
+            : ext === ".rs" ? "rust"
             : "javascript"
         );
     }
@@ -583,7 +587,7 @@ function activate(context) {
             }
             if (!isSupportedLanguage(editor.document.languageId)) {
                 vscode.window.showWarningMessage(
-                    `Live Uml Evo doesn't support ${editor.document.languageId} files. Open a Java, Python, JavaScript, TypeScript, C or C++ file to diagram a project.`
+                    `Live Uml Evo doesn't support ${editor.document.languageId} files. Open a Java, Python, JavaScript, TypeScript, C, C++ or Rust file to diagram a project.`
                 );
                 return;
             }
@@ -1214,6 +1218,7 @@ class LiveUmlSidebar {
         else if (currentLanguage === "javascript") ext = ".js";
         else if (currentLanguage === "typescript") ext = ".ts";
         else if (currentLanguage === "cpp") ext = ".cpp";
+        else if (currentLanguage === "rust") ext = ".rs";
 
         if (ext) {
             if (this._workspaceFileCountCache.ext !== ext) {
@@ -1580,6 +1585,7 @@ class LiveUmlSidebar {
             : ext === ".py" ? "python"
             : ext === ".ts" ? "typescript"
             : ext === ".cpp" || ext === ".cc" || ext === ".cxx" ? "cpp"
+            : ext === ".rs" ? "rust"
             : "javascript";
         const provider = registry.getLanguageProvider(languageId);
 
@@ -1640,6 +1646,7 @@ class LiveUmlSidebar {
             : ext === ".py" ? "python"
             : ext === ".ts" ? "typescript"
             : ext === ".cpp" || ext === ".cc" || ext === ".cxx" ? "cpp"
+            : ext === ".rs" ? "rust"
             : "javascript";
         const provider = registry.getLanguageProvider(languageId);
 

@@ -2,6 +2,7 @@ const CLanguageProvider = require('./providers/languages/CLanguageProvider');
 const JavaLanguageProvider = require('./providers/languages/JavaLanguageProvider');
 const JavaScriptLanguageProvider = require('./providers/languages/JavaScriptLanguageProvider');
 const PythonLanguageProvider = require('./providers/languages/PythonLanguageProvider');
+const RustLanguageProvider = require('./providers/languages/RustLanguageProvider');
 
 const PlantUMLFlowchartProvider = require('./providers/diagrams/plantuml/FlowchartProvider');
 const PlantUMLSequenceProvider = require('./providers/diagrams/plantuml/SequenceProvider');
@@ -22,7 +23,8 @@ class ProviderRegistry {
             'javascript': new JavaScriptLanguageProvider(),
             'typescript': new JavaScriptLanguageProvider(),
             'typescriptreact': new JavaScriptLanguageProvider(),
-            'python': new PythonLanguageProvider()
+            'python': new PythonLanguageProvider(),
+            'rust': new RustLanguageProvider()
         };
         this.diagrams = {
             'plantuml_flowchart': new PlantUMLFlowchartProvider(),
