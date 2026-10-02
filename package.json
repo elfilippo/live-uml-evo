@@ -98,7 +98,7 @@
         "menus": {
             "view/title": [
                 {
-                    "command": "liveUmlEvo.refreshDiagrams",
+                    "command": "liveUmlEvo.refresh",
                     "when": "view == liveUmlEvoSidebar-webview",
                     "group": "navigation"
                 }
