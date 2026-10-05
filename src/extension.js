@@ -220,7 +220,16 @@ function activate(context) {
                 sidebarProvider.currentClassName = className;
                 sidebarProvider.currentDiagramType = "class";
 
-                await vscode.window.showTextDocument(doc);
+                const targetEditor = await vscode.window.showTextDocument(doc);
+                const declared = parseClasses(doc).find((c) => c.name === className);
+                if (declared && Number.isInteger(declared.startLine)) {
+                    const position = new vscode.Position(declared.startLine, 0);
+                    targetEditor.selection = new vscode.Selection(position, position);
+                    targetEditor.revealRange(
+                        new vscode.Range(position, position),
+                        vscode.TextEditorRevealType.InCenterIfOutsideViewport
+                    );
+                }
 
                 // Clear hash state so the diagram always re-generates after navigation
                 sidebarProvider._lastClassHash = null;
@@ -927,6 +936,7 @@ function activate(context) {
         if (sidebarProvider) {
             sidebarProvider._classCache.delete(`light:${ext}:${uriStr}`);
             sidebarProvider._classCache.delete(`full:${ext}:${uriStr}`);
+            sidebarProvider._classCache.delete(`frag:${ext}:${uriStr}`);
             sidebarProvider._fileContentCache.delete(`content:${ext}:${uriStr}`);
             // Mark the extension dirty rather than deleting the aggregate cache
             // outright — findWorkspaceClasses then reconciles by re-reading only
@@ -1061,19 +1071,13 @@ class LiveUmlSidebar {
                     // matched any class, so the <<active>>/:::active highlight never applied
                     // until a later cursor-driven refresh picked the right class.
                     if (msg.diagramType === "class") {
-                        if (this.currentClassName) {
-                            await this.generate(this.currentClassName, "class");
-                        } else {
-                            // No class target tracked yet for this file (e.g. the very
-                            // first tab switch on a freshly opened editor) — fall back to
-                            // the same way refresh() picks a default, instead of silently
-                            // doing nothing and leaving whatever was on screen before.
-                            const editor = vscode.window.activeTextEditor;
-                            const classes = editor ? parseClasses(editor.document) : [];
-                            if (classes.length > 0) {
-                                this.currentClassName = classes[0].name;
-                                await this.generate(classes[0].name, "class");
-                            }
+                        const editor = vscode.window.activeTextEditor;
+                        const classes = editor ? parseClasses(editor.document) : [];
+                        const cursorClassName = editor ? classAtLine(editor.document, classes, editor.selection.active.line) : null;
+                        const target = cursorClassName || this.currentClassName || (classes.length > 0 ? classes[0].name : null);
+                        if (target) {
+                            this.currentClassName = target;
+                            await this.generate(target, "class");
                         }
                     } else if (this.currentFunctionName) {
                         await this.generate(this.currentFunctionName, msg.diagramType);
@@ -1217,10 +1221,10 @@ class LiveUmlSidebar {
     }
 
     // `selectionOnly` marks a refresh triggered purely by the cursor moving (no
-    // text edit, no file switch, no explicit tab/selection action). In that case
-    // the Class diagram is left completely untouched, since it isn't keyed to
-    // cursor position and workspace-scanning it on every click was expensive and
-    // pointless. (Whether the webview does a full or partial re-render is decided
+    // text edit, no file switch, no explicit tab/selection action). On the Class
+    // tab that only regenerates when the cursor has moved into a different class,
+    // since workspace-scanning on every click would be expensive and pointless.
+    // (Whether the webview does a full or partial re-render is decided
     // entirely on its side, from whether the update actually changes the panel's
     // shape — not from a flag set here.)
     async refresh(options = {}) {
@@ -1283,14 +1287,11 @@ class LiveUmlSidebar {
 
         const currentFunc = functions.find((f) => cursorLine >= f.startLine && cursorLine <= f.endLine);
 
-        // A selection-only refresh never touches the Class diagram's target — it
-        // stays exactly as the user last set it via the dropdown, a diagram click,
-        // or switching to the Class tab.
-        const currentCls =
-            selectionOnly ? null : classes.find((c) => cursorLine >= c.startLine && cursorLine <= c.endLine);
+        const cursorClassName = classAtLine(editor.document, classes, cursorLine);
+        const previousClassName = this.currentClassName;
 
-        if (currentCls && this.currentDiagramType === "class") {
-            this.currentClassName = currentCls.name;
+        if (cursorClassName && this.currentDiagramType === "class") {
+            this.currentClassName = cursorClassName;
         }
 
         const newFunctionName =
@@ -1298,15 +1299,15 @@ class LiveUmlSidebar {
             : functions.length > 0 ? functions[0].name
             : null;
         const newClassName =
-            selectionOnly ? this.currentClassName
-            : currentCls ? currentCls.name
-            : this.currentClassName || (classes.length > 0 ? classes[0].name : null);
+            cursorClassName || this.currentClassName || (classes.length > 0 ? classes[0].name : null);
         const newDocUri = editor.document.uri.toString();
+        const classNames = classes.map((c) => c.name);
+        if (cursorClassName && !classNames.includes(cursorClassName)) classNames.push(cursorClassName);
 
         this.post({
             type: "update",
             functions: functions.map((f) => f.name),
-            classes: classes.map((c) => c.name),
+            classes: classNames,
             currentFunction: newFunctionName,
             currentClass: newClassName,
             stats: {
@@ -1323,8 +1324,8 @@ class LiveUmlSidebar {
             `refresh(): will generate for target=${newFunctionName || newClassName}, type=${this.currentDiagramType}`
         );
         if (this.currentDiagramType === "class") {
-            if (selectionOnly) {
-                logger.log("refresh(): selection-only refresh on Class tab, skipping regeneration entirely");
+            if (selectionOnly && newClassName === previousClassName) {
+                logger.log("refresh(): selection-only refresh on Class tab, target unchanged, skipping regeneration");
                 return;
             }
             if (newClassName) {
@@ -1420,7 +1421,13 @@ class LiveUmlSidebar {
                     logger.log(`generate(): +${extraClasses.length} workspace classes, total=${classes.length}`);
                 }
 
-                const firstResult = visualizer.generateClass(targetName, classes, currentLanguage);
+                const implFragments = await this._collectImplFragments(editor.document, ext);
+                const withFragments = (list) => {
+                    if (implFragments.length === 0) return list;
+                    return registry.getLanguageProvider(editor.document.languageId).finalizeClasses([...list, ...implFragments]);
+                };
+
+                const firstResult = visualizer.generateClass(targetName, withFragments(classes), currentLanguage);
                 logger.log(`generate(): first-pass displayClassNames=${JSON.stringify(firstResult.displayClassNames)}`);
 
                 if (firstResult.displayClassNames && firstResult.displayClassNames.length > 0) {
@@ -1428,7 +1435,7 @@ class LiveUmlSidebar {
                     logger.log("generate(): resolved display class methods");
                 }
 
-                const result = visualizer.generateClass(targetName, classes, currentLanguage);
+                const result = visualizer.generateClass(targetName, withFragments(classes), currentLanguage);
                 diagramCode = result.uml || result.mermaidCode || "";
                 classCount = result.classCount;
                 const currentHash = crypto.createHash("md5").update(diagramCode).digest("hex");
@@ -1608,6 +1615,40 @@ class LiveUmlSidebar {
         }
     }
 
+    async _collectImplFragments(document, ext) {
+        const provider = registry.getLanguageProvider(document.languageId);
+        if (typeof provider.parseImplFragments !== "function") return [];
+
+        const currentUri = document.uri.toString();
+        const fragments = provider.parseImplFragments(document.getText());
+        const prefix = `light:${ext}:`;
+        for (const key of Array.from(this._classCache.keys())) {
+            if (!key.startsWith(prefix)) continue;
+            const uriStr = key.slice(prefix.length);
+            if (uriStr === currentUri) continue;
+
+            const fragmentKey = `frag:${ext}:${uriStr}`;
+            let cached = this._classCache.get(fragmentKey);
+            if (!cached) {
+                const contentKey = `content:${ext}:${uriStr}`;
+                let content = this._fileContentCache.get(contentKey);
+                if (content === undefined) {
+                    try {
+                        const bytes = await vscode.workspace.fs.readFile(vscode.Uri.parse(uriStr));
+                        content = Buffer.from(bytes).toString("utf8");
+                        this._fileContentCache.set(contentKey, content);
+                    } catch (e) {
+                        continue;
+                    }
+                }
+                cached = provider.parseImplFragments(content);
+                this._classCache.set(fragmentKey, cached);
+            }
+            fragments.push(...cached);
+        }
+        return fragments;
+    }
+
     async findWorkspaceClasses(targetName, currentDoc) {
         const ext = path.extname(currentDoc.uri.fsPath);
 
@@ -1765,6 +1806,23 @@ function parseClasses(document) {
     const languageId = document.languageId;
     const provider = registry.getLanguageProvider(languageId);
     return provider.parseClasses(text);
+}
+
+function classAtLine(document, classes, line) {
+    const provider = registry.getLanguageProvider(document.languageId);
+    const candidates = typeof provider.parseImplFragments === "function"
+        ? classes.concat(provider.parseImplFragments(document.getText()))
+        : classes;
+    let best = null;
+    for (const cls of candidates) {
+        const ranges = cls.ranges || [{ startLine: cls.startLine, endLine: cls.endLine }];
+        for (const range of ranges) {
+            if (line >= range.startLine && line <= range.endLine && (!best || range.startLine >= best.startLine)) {
+                best = { name: cls.name, startLine: range.startLine };
+            }
+        }
+    }
+    return best ? best.name : null;
 }
 
 module.exports = { activate };

@@ -595,7 +595,8 @@ class RustLanguageProvider extends BaseLanguageProvider {
                 supertypeArgs: {},
                 methods: [],
                 fields: [],
-                body: ''
+                body: '',
+                ranges: []
             };
             this._applyImpl(fragment, target, item, true);
             fragments.push(fragment);
@@ -694,6 +695,7 @@ class RustLanguageProvider extends BaseLanguageProvider {
             startLine: item.startLine,
             body: item.text,
             endLine: item.endLine,
+            ranges: [{ startLine: item.startLine, endLine: item.endLine }],
             paramLists: [],
             language: 'rust'
         };
@@ -755,6 +757,7 @@ class RustLanguageProvider extends BaseLanguageProvider {
         if (!full) return;
         this._applyMembers(cls, impl.members, target.traitName ? '+' : '-', false);
         cls.body = cls.body ? `${cls.body}\n${impl.text}` : impl.text;
+        cls.ranges.push({ startLine: impl.startLine, endLine: impl.endLine });
     }
 
     _applyMembers(cls, members, fallbackVisibility, inTrait) {

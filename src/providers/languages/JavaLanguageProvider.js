@@ -2,6 +2,8 @@ const BaseLanguageProvider = require('./BaseLanguageProvider');
 
 const TYPE = '[\\w.$]+(?:\\s*<[^>]*>)?(?:\\s*\\[\\s*\\])*';
 const FIELD_MODIFIERS = '(?:(?:public|private|protected|static|final|transient|volatile)\\s+)*';
+const RECORD_START = /^(?:(?:public|protected|private|static|final|strictfp)\s+)*record\s+\w+\s*[<(]/;
+const RECORD_PATTERN = /^\s*((?:(?:public|protected|private|static|final|strictfp)\s+)*)record\s+(\w+)\s*\((?:[^)]*\))?(?:\s+implements\s+([\w\s,.]+))?\s*\{?/;
 const NON_FIELD_STARTS = new Set([
     'return', 'throw', 'new', 'import', 'package', 'assert', 'break', 'continue',
     'case', 'default', 'else', 'this', 'super', 'yield'
@@ -45,6 +47,7 @@ class JavaLanguageProvider extends BaseLanguageProvider {
     matchFunctionStart(line) {
         const trimmed = line.trim();
         if (/^\s*(if|else|while|for|switch|return|class|interface|enum|import|package|@|try|catch|finally)\b/.test(trimmed)) return null;
+        if (RECORD_START.test(trimmed)) return null;
 
         const keywords = ['if', 'else', 'while', 'for', 'switch', 'return', 'class', 'interface', 'new', 'try', 'catch', 'finally', 'throw'];
 
@@ -79,7 +82,8 @@ class JavaLanguageProvider extends BaseLanguageProvider {
         return {
             visibility: null,
             isEnum: !!(classMatch && classMatch.isEnum),
-            isInterface: !!(classMatch && classMatch.isInterface)
+            isInterface: !!(classMatch && classMatch.isInterface),
+            isRecord: !!(classMatch && classMatch.isRecord)
         };
     }
 
@@ -99,6 +103,14 @@ class JavaLanguageProvider extends BaseLanguageProvider {
     // Recompute the real constant list independently here and reconcile.
     extractMembers(body, classMatch = null) {
         const result = super.extractMembers(body, classMatch);
+        if (classMatch && classMatch.isRecord) {
+            const components = this.matchRecordComponents(body);
+            const names = new Set(components.map(c => c.name));
+            return {
+                methods: result.methods,
+                fields: [...components, ...result.fields.filter(f => !names.has(f.name))]
+            };
+        }
         if (!classMatch || !classMatch.isEnum) return result;
 
         const constants = this.collectExtraFields(body, { isEnum: true });
@@ -117,6 +129,7 @@ class JavaLanguageProvider extends BaseLanguageProvider {
     }
 
     collectExtraFields(body, state) {
+        if (state && state.isRecord) return this.matchRecordComponents(body);
         if (!state || !state.isEnum) return [];
 
         const openIdx = body.indexOf('{');
@@ -144,6 +157,62 @@ class JavaLanguageProvider extends BaseLanguageProvider {
         }
 
         return this.matchEnumConstants(segment);
+    }
+
+    matchRecordComponents(body) {
+        const header = /\brecord\s+\w+\s*/.exec(body);
+        if (!header) return [];
+        let i = header.index + header[0].length;
+        if (body[i] === '<') {
+            let depth = 0;
+            for (; i < body.length; i++) {
+                if (body[i] === '<') depth++;
+                else if (body[i] === '>' && --depth === 0) { i++; break; }
+            }
+            while (/\s/.test(body[i] || '')) i++;
+        }
+        if (body[i] !== '(') return [];
+        let depth = 0;
+        let end = -1;
+        for (let j = i; j < body.length; j++) {
+            if (body[j] === '(') depth++;
+            else if (body[j] === ')' && --depth === 0) { end = j; break; }
+        }
+        if (end < 0) return [];
+
+        const parts = [];
+        let current = '';
+        let nesting = 0;
+        for (const ch of body.slice(i + 1, end)) {
+            if (ch === '<' || ch === '(') nesting++;
+            else if (ch === '>' || ch === ')') nesting--;
+            if (ch === ',' && nesting === 0) {
+                parts.push(current);
+                current = '';
+            } else {
+                current += ch;
+            }
+        }
+        parts.push(current);
+
+        const components = [];
+        for (const part of parts) {
+            const cleaned = part
+                .replace(/@\w+(?:\.\w+)*(?:\s*\([^)]*\))?/g, ' ')
+                .replace(/\bfinal\b/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            const match = /^(.+?)\s+(\w+)$/.exec(cleaned);
+            if (!match) continue;
+            components.push({
+                name: match[2],
+                type: match[1].replace(/\s*\.\.\.$/, '[]'),
+                visibility: '-',
+                isStatic: false,
+                isFinal: true
+            });
+        }
+        return components;
     }
 
     matchEnumConstants(segment) {
@@ -254,6 +323,26 @@ class JavaLanguageProvider extends BaseLanguageProvider {
 
     matchClassStart(line) {
         const { text: trimmed, args } = splitAngles(line.trim());
+        const record = RECORD_PATTERN.exec(trimmed);
+        if (record) {
+            const interfaces = record[3] ? record[3].split(',').map(s => s.trim()).filter(Boolean) : [];
+            const supertypeArgs = {};
+            interfaces.forEach(name => {
+                if (args[name]) supertypeArgs[name] = args[name];
+            });
+            return {
+                name: record[2],
+                parent: null,
+                extraParents: [],
+                interfaces: interfaces,
+                supertypeArgs: supertypeArgs,
+                typeParams: this.parseTypeParameters(args[record[2]]),
+                isInterface: false,
+                isEnum: false,
+                isAbstract: false,
+                isRecord: true
+            };
+        }
         // matches: public abstract class MyClass extends Parent<String> implements Iface1, Iface2 {
         const classPattern = /^\s*((?:(?:public|protected|private|static|final|abstract)\s+)*)(class|interface|enum)\s+(\w+)(?:\s+extends\s+([\w.]+(?:\s*,\s*[\w.]+)*))?(?:\s+implements\s+([\w\s,.]+))?\s*\{?/;
         const match = trimmed.match(classPattern);

@@ -92,8 +92,6 @@ class BaseLanguageProvider extends LanguageProvider {
                         paramLists: members.paramLists || [],
                         language: this.language
                     });
-                    i = classBody.endLine + 1;
-                    continue;
                 }
             }
             i++;
